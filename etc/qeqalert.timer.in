@@ -1,0 +1,13 @@
+[Unit]
+Description=Timer for qEQAlert
+Before=network-online.target
+After=NetworkManager.service systemd-resolved.service
+
+[Timer]
+# システム起動後15秒後にqeqalert.serviceサービスを起動する
+OnBootSec=15
+Unit=qeqalert.service
+
+[Install]
+# システムのタイマターゲットに関連付け、システム起動時にタイマを有効にする
+WantedBy=timers.target

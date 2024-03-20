@@ -1,0 +1,15 @@
+[Unit]
+Description=Server utilities for qEQAlert
+Before=network-online.target
+After=NetworkManager.service systemd-resolved.service
+
+[Service]
+Type=simple
+ExecStart=@CMAKE_INSTALL_PREFIX@/bin/qEQAlert --sysconf=@SYSCONF_DIR@/qEQAlert.json
+ExecReload=/bin/kill -HUP  $MAINPID
+ExecStop=/bin/kill   -TERM $MAINPID
+PIDFile=@PID@/qEQAlert.pid
+Restart=on-success
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+{
+    "earthquake": {
+        "alert": false,
+        "alertlog": "/tmp/eqalert.log",
+        "alertscale": 50,
+        "bbs": "",
+        "chtt": false,
+        "from": "佐藤",
+        "info": true,
+        "infolog": "/tmp/eqinfo.log",
+        "infoscale": 50,
+        "interval": 10,
+        "mail": "",
+        "oneshot": false,
+        "requesturl": "",
+        "shiftjis": true,
+        "subjecttime": true
+    }
+}

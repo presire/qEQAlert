@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+
+appname="qEQAlert"
+
+# use -f to make the readlink path absolute
+dirname="$(dirname -- "$(readlink -f -- "${0}")" )"
+
+if [ "$dirname" = "." ]; then
+    dirname="$PWD/$dirname"
+fi
+
+cd $dirname
+
+# 終了するまでの総秒数
+END=60
+
+# 現在の秒数
+SECONDS=0
+
+# 待機時間
+WAIT=10
+
+# 60秒間 (1分) にわたって秒間隔で実行
+while [ $SECONDS -lt $END ]; do
+    # qEQAlertを実行
+    "$dirname/$appname" "$@"
+
+    # 指定時間待機
+    sleep $WAIT
+
+    SECONDS=$(($SECONDS + $WAIT))
+done
