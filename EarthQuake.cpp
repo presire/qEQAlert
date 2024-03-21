@@ -1,3 +1,4 @@
+#include <QTimeZone>
 #include <iostream>
 #include <cmath>
 #include <utility>
@@ -292,6 +293,7 @@ int Worker::FormattingData()
             auto timeStr        = issueObj["time"].toString();
             auto issueTime      = QDateTime::fromString(timeStr, "yyyy/MM/dd HH:mm:ss");
             auto currentTime    = QDateTime::currentDateTime();
+            currentTime.setTimeZone(QTimeZone("Asia/Tokyo"));
 
             /// 現在時刻と比較して、緊急地震速報(警報)の最新情報が30[秒]以内かどうかを確認
             /// 30[秒]以内の地震情報の場合は取得
@@ -384,6 +386,7 @@ int Worker::FormattingData()
             auto timeStr            = earthquakeObject["time"].toString();
             auto issueTime          = QDateTime::fromString(timeStr, "yyyy/MM/dd HH:mm:ss");
             auto currentTime        = QDateTime::currentDateTime();
+            currentTime.setTimeZone(QTimeZone("Asia/Tokyo"));
 
             /// 現在時刻と比較して、緊急地震速報(警報)の最新情報が5[分]以内かどうかを確認
             /// 5[分]以内の地震情報の場合は取得
@@ -1343,6 +1346,7 @@ qint64 Worker::GetEpocTime()
 {
     // 現在の日時を取得
     QDateTime now = QDateTime::currentDateTime();
+    now.setTimeZone(QTimeZone("Asia/Tokyo"));
 
     // エポックタイム (UNIX時刻) を秒単位で取得
     qint64 epochTime = now.toSecsSinceEpoch();

@@ -133,7 +133,7 @@ xmlXPathObjectPtr HtmlFetcher::getNodeset(xmlDocPtr doc, const xmlChar *xpath)
 }
 
 
-// 新規作成したスレッドからスレッドのパスおよびスレッド番号を取得する
+// 新規作成および書き込みしたスレッドからスレッドのパスおよびスレッド番号を取得する
 int HtmlFetcher::extractThreadPath(const QString &htmlContent, const QString &bbs)
 {
     // HTMLコンテンツをパース
@@ -173,7 +173,7 @@ int HtmlFetcher::extractThreadPath(const QString &htmlContent, const QString &bb
                 m_ThreadPath = match.captured(1);
 
 #ifdef _DEBUG
-                std::cout << QString("新規作成したスレッドのパス : %1").arg(m_ThreadPath).toStdString() << std::endl;
+                std::cout << QString("スレッドのパス : %1").arg(m_ThreadPath).toStdString() << std::endl;
 #endif
             }
 
@@ -187,7 +187,7 @@ int HtmlFetcher::extractThreadPath(const QString &htmlContent, const QString &bb
                 m_ThreadNum = ThreadNumMatch[1].str().c_str();
 
 #ifdef _DEBUG
-                std::cout << "新規作成したスレッド番号 : " << m_ThreadNum.toStdString() << std::endl;
+                std::cout << "スレッド番号 : " << m_ThreadNum.toStdString() << std::endl;
 #endif
             }
         }

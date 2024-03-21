@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(qEQAlert VERSION 0.1.0 LANGUAGES CXX)
+project(qEQAlert VERSION 0.1.1 LANGUAGES CXX)
 
 
 # Linuxのみビルドを許可
@@ -212,12 +212,12 @@ if(UNIX AND NOT APPLE)
 endif()
 
 
-## qEQAlert用のラッパースクリプト
+## ワンショット用ラッパーシェルスクリプト
 if(UNIX)
-    ## qEQAlert用のラッパースクリプトのインストールルール
+    ## ワンショット用ラッパーシェルスクリプトのインストールルール
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Scripts/qEQAlert.sh.in ${CMAKE_CURRENT_BINARY_DIR}/Scripts/qEQAlert.sh @ONLY)
 
-    ## qEQAlert用のラッパースクリプトのインストールディレクトリを指定
+    ## ワンショット用ラッパーシェルスクリプトのインストールディレクトリを指定
     ## また、実行権限も付与する
     install(PROGRAMS
             ${CMAKE_CURRENT_BINARY_DIR}/Scripts/qEQAlert.sh

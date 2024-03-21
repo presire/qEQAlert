@@ -317,15 +317,18 @@ int Runner::getConfiguration(QString &filepath)
             }
         }
 
-        // 地震情報の取得の時間間隔が5秒未満、または、60秒を超える場合は、強制的に10秒に設定
-        m_EQInterval = earthquakeObj.value("interval").toInt(10);
-        if (m_EQInterval < 5 || m_EQInterval > 60) {
-            std::cout << QString("地震情報の取得間隔が不正です 設定値 : %1").arg(m_EQInterval).toStdString() << std::endl;
-            std::cout << QString("強制的に10[秒]に設定されます").toStdString() << std::endl;
+        // ワンショット機能が有効の場合、タイマ割り込みの設定
+        if (!m_bOneShot) {
+            // 地震情報の取得の時間間隔が5秒未満、または、60秒を超える場合は、強制的に10秒に設定
+            m_EQInterval = earthquakeObj.value("interval").toInt(10);
+            if (m_EQInterval < 5 || m_EQInterval > 60) {
+                std::cout << QString("地震情報の取得間隔が不正です 設定値 : %1").arg(m_EQInterval).toStdString() << std::endl;
+                std::cout << QString("強制的に10[秒]に設定されます").toStdString() << std::endl;
 
-            m_EQInterval = 10;
+                m_EQInterval = 10;
+            }
+            m_EQInterval *= 1000;
         }
-        m_EQInterval *= 1000;
 
         // 震度の閾値
         const std::set<int> allowedScale = {10, 20, 30, 40, 45, 50, 55, 60, 70};

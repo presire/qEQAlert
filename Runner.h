@@ -7,6 +7,7 @@
     #include <QSocketNotifier>
 #elif Q_OS_WIN
     #include <QWinEventNotifier>
+    #include <windows.h>
 #endif
 
 #include <QObject>
