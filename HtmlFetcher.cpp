@@ -167,10 +167,10 @@ int HtmlFetcher::extractThreadPath(const QString &htmlContent, const QString &bb
 
             /// 次に、抽出したURLの部分からスレッドのパスを抽出
             /// 正規表現パターン : 最後の "/" 以前を取得する
-            static QRegularExpression re2("^(.+/)[^/]+");
-            QRegularExpressionMatch match = re2.match(url);
-            if (match.hasMatch()) {
-                m_ThreadPath = match.captured(1);
+            static QRegularExpression regExThreadPath("^(.+/)[^/]+");
+            QRegularExpressionMatch MatchThreadPath = regExThreadPath.match(url);
+            if (MatchThreadPath.hasMatch()) {
+                m_ThreadPath = MatchThreadPath.captured(1);
 
 #ifdef _DEBUG
                 std::cout << QString("スレッドのパス : %1").arg(m_ThreadPath).toStdString() << std::endl;
@@ -178,18 +178,29 @@ int HtmlFetcher::extractThreadPath(const QString &htmlContent, const QString &bb
             }
 
             /// さらに、抽出したURLの部分からスレッド番号を抽出
-            auto urlStr = url.toStdString();
-            QString RegStr = QString("/[^/]+/%1/([^/]+)/").arg(bbs);
-            std::regex re3(RegStr.toStdString());
-            std::smatch ThreadNumMatch;
-            if (std::regex_search(urlStr, ThreadNumMatch, re3) && ThreadNumMatch.size() > 1) {
-                // スレッド番号を取得
-                m_ThreadNum = ThreadNumMatch[1].str().c_str();
+            static QRegularExpression regExThreadNum(QString("/%1/([^/]+)/").arg(bbs));
+            QRegularExpressionMatch MatchThreadNum = regExThreadNum.match(url);
+            if (MatchThreadNum.hasMatch()) {
+                m_ThreadNum = MatchThreadNum.captured(1);
 
 #ifdef _DEBUG
                 std::cout << "スレッド番号 : " << m_ThreadNum.toStdString() << std::endl;
 #endif
             }
+
+//            /// さらに、抽出したURLの部分からスレッド番号を抽出 (C++標準ライブラリを使用する場合)
+//            /// デッドコードではあるが、処理をコメントアウトして一時的に保存する
+//            auto urlStr = url.toStdString();
+//            std::regex regExThreadNum(QString("/[^/]+/%1/([^/]+)/").arg(bbs).toStdString());
+//            std::smatch ThreadNumMatch;
+//            if (std::regex_search(urlStr, ThreadNumMatch, regExThreadNum) && ThreadNumMatch.size() > 1) {
+//                // スレッド番号を取得
+//                m_ThreadNum = ThreadNumMatch[1].str().c_str();
+
+//#ifdef _DEBUG
+//                std::cout << "スレッド番号 : " << m_ThreadNum.toStdString() << std::endl;
+//#endif
+//            }
         }
     }
 

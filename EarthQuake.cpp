@@ -311,6 +311,9 @@ int Worker::FormattingData()
                 continue;
             }
 
+            /// 緊急地震速報(警報)のオブジェクトをクリア
+            m_Alert = EarthQuakeAlert();
+
             /// ユーザが設定した震度の閾値を確認
             /// 1つでも閾値以上の地震が各地域で予測される場合は、緊急地震速報(警報)の情報を取得
             auto areas = obj["areas"].toArray();
@@ -368,10 +371,10 @@ int Worker::FormattingData()
                 QVariant depthVal     = hypocenterObj["depth"].toDouble(0.0f);        // 震源の深さ
                 m_Alert.m_Depth       = ConvertNumberToString(depthVal);
 
-                auto latitude         = hypocenterObj["latitude"].toDouble(0.0f);     // 緯度  震源情報が存在しない場合は、-200
+                auto latitude         = hypocenterObj["latitude"].toDouble(0.0f);     // 緯度  震源情報が存在しない場合は、-200または-200.0
                 m_Alert.m_Latitude    = QString::number(latitude, 'f', 1);
 
-                auto longitude        = hypocenterObj["longitude"].toDouble(0.0f);    // 経度  震源情報が存在しない場合は、-200
+                auto longitude        = hypocenterObj["longitude"].toDouble(0.0f);    // 経度  震源情報が存在しない場合は、-200または-200.0
                 m_Alert.m_Longitude   = QString::number(longitude, 'f', 1);
 
                 /// IDを緊急地震速報(警報)のログファイルに保存
@@ -391,8 +394,22 @@ int Worker::FormattingData()
             /// 現在時刻と比較して、緊急地震速報(警報)の最新情報が5[分]以内かどうかを確認
             /// 5[分]以内の地震情報の場合は取得
             qint64 diff = static_cast<int>(issueTime.msecsTo(currentTime) / 1000);
-            if (!(diff >= 0 && diff <= 300)) {
-                /// 発生した地震情報において、300[秒](5[分])を超過している場合は無視する
+            if (!(diff >= 0 && diff <= 600)) {
+                /// 発生した地震情報において、600[秒](10[分])を超過している場合は無視する
+                continue;
+            }
+
+            /// ユーザが設定した震度の閾値を確認
+            /// 1つでも閾値以上の地震が各地域で発生した場合は、発生した地震情報を取得
+            auto scale = obj["earthquake"].toObject()["maxScale"].toInt(-1);
+            if (scale < m_CommonData.InfoScale) {
+                continue;
+            }
+
+            /// 震源地の情報が存在するかどうかを確認
+            auto hypo  = obj["earthquake"].toObject()["hypocenter"].toObject()["name"].toString("");
+            if (hypo.isEmpty()) {
+                /// 震源地が不明の場合は無視する
                 continue;
             }
 
@@ -404,14 +421,10 @@ int Worker::FormattingData()
                 continue;
             }
 
-            /// ユーザが設定した震度の閾値を確認
-            /// 1つでも閾値以上の地震が各地域で発生した場合は、発生した地震情報を取得
-            auto scale = obj["earthquake"].toObject()["maxScale"].toInt(-1);
-            if (scale < m_CommonData.InfoScale) {
-                continue;
-            }
-
             bNewEarthQuake = true;
+
+            /// 発生した地震情報のオブジェクトをクリア
+            m_Info = EarthQuakeInfo();
 
             /// ユーザが設定した震度以上の地域が存在する場合、発生した地震情報を取得
             /// 発生した地震情報が出ている地域を取得
@@ -452,10 +465,10 @@ int Worker::FormattingData()
             auto intDepth        = static_cast<int>(depth);                      // P2P地震情報ではシステムの都合で小数点が付加される場合はあるが、整数部のみ有効である
             m_Info.m_Depth       = QString::number(intDepth);
 
-            auto latitude        = hypocenterObj["latitude"].toDouble(0.0f);     // 緯度  震源情報が存在しない場合は、-200
+            auto latitude        = hypocenterObj["latitude"].toDouble(0.0f);     // 緯度  震源情報が存在しない場合は、-200または-200.0
             m_Info.m_Latitude    = QString::number(latitude, 'f', 1);
 
-            auto longitude       = hypocenterObj["longitude"].toDouble(0.0f);    // 経度  震源情報が存在しない場合は、-200
+            auto longitude       = hypocenterObj["longitude"].toDouble(0.0f);    // 経度  震源情報が存在しない場合は、-200または-200.0
             m_Info.m_Longitude   = QString::number(longitude, 'f', 1);
 
             /// IDを緊急地震速報(警報)のログファイルに保存
@@ -487,31 +500,37 @@ int Worker::FormattingThreadInfo()
 
         // スレッドの内容
         /// 震源地
-        m_ThreadInfo.message  = name.isEmpty() ? QString("震源地 : 不明") : QString("震源地 : %1").arg(name + "\n");
+        m_ThreadInfo.message  = name.isEmpty() ? QString("震源地 : 不明") + "\n" : QString("震源地 : %1").arg(name + "\n");
 
         /// マグニチュード
-        m_ThreadInfo.message += magnitude.isEmpty() ? QString("") : QString(magnitude + "\n");
+        m_ThreadInfo.message += magnitude.isEmpty() ? QString("マグニチュードの情報なし") + "\n" : QString(magnitude + "\n");
 
         /// 震源の深さ
         auto depth = m_Alert.m_Depth == "0" ? QString("ごく浅い") : m_Alert.m_Depth == "-1" ? QString("情報なし") : QString(m_Alert.m_Depth + "[km]");
         m_ThreadInfo.message += QString("震源の深さ : %1").arg(depth + "\n\n");
 
         /// 緯度
-        auto latitude = m_Alert.m_Latitude.compare("-200", Qt::CaseSensitive) != 0 ?
-                            QString("緯度 : %1度").arg(m_Alert.m_Latitude) : QString("緯度 : 情報なし");
-        m_ThreadInfo.message += latitude + "\n";
+        if (m_Alert.m_Latitude.compare("-200", Qt::CaseInsensitive) == 0 || m_Alert.m_Latitude.compare("-200.0", Qt::CaseInsensitive) == 0) {
+            m_ThreadInfo.message += QString("緯度 : 情報なし") + "\n";
+        }
+        else {
+            m_ThreadInfo.message += QString("北緯 : %1度").arg(m_Alert.m_Latitude) + "\n";
+        }
 
         /// 経度
-        auto longitude = m_Alert.m_Longitude.compare("-200", Qt::CaseSensitive) != 0 ?
-                            QString("経度 : %1度").arg(m_Alert.m_Longitude) : QString("経度 : 情報なし");
-        m_ThreadInfo.message += longitude + "\n";
+        if (m_Alert.m_Longitude.compare("-200", Qt::CaseInsensitive) == 0 || m_Alert.m_Longitude.compare("-200.0", Qt::CaseInsensitive) == 0) {
+            m_ThreadInfo.message += QString("経度 : 情報なし") + "\n";
+        }
+        else {
+            m_ThreadInfo.message += QString("東経 : %1度").arg(m_Alert.m_Longitude) + "\n";
+        }
 
         /// 地震発生時刻
-        auto originTime     = m_Alert.m_OriginTime.isEmpty() ? QString("") : QString("地震発生時刻 : %1").arg(m_Alert.m_OriginTime + "\n");
+        auto originTime     = m_Alert.m_OriginTime.isEmpty() ? QString("") + "\n" : QString("地震発生時刻 : %1").arg(m_Alert.m_OriginTime + "\n");
         m_ThreadInfo.message += originTime;
 
         /// 地震発現(到達)時刻
-        auto arrivalTime    = m_Alert.m_ArrivalTime.isEmpty() ? QString("") : QString("地震発現(到達)時刻 : %1").arg(m_Alert.m_ArrivalTime + "\n\n");
+        auto arrivalTime    = m_Alert.m_ArrivalTime.isEmpty() ? QString("") + "\n" : QString("地震発現(到達)時刻 : %1").arg(m_Alert.m_ArrivalTime + "\n\n");
         m_ThreadInfo.message += arrivalTime;
 
         /// 緊急地震速報(警報)の対象地域
@@ -573,10 +592,10 @@ int Worker::FormattingThreadInfo()
 
         // スレッドの内容
         /// 震源地
-        m_ThreadInfo.message  = name.isEmpty() ? QString("震源地 : 不明") : QString("震源地 : %1").arg(name + "\n");
+        m_ThreadInfo.message  = name.isEmpty() ? QString("震源地 : 不明") + "\n" : QString("震源地 : %1").arg(name + "\n");
 
         /// 震度
-        m_ThreadInfo.message += maxscale.isEmpty() ? QString("震度情報なし") + "\n" : QString("%1").arg(maxscale + "\n");
+        m_ThreadInfo.message += maxscale.isEmpty() ? QString("最大震度情報なし") + "\n" : QString("最大%1").arg(maxscale + "\n");
 
         /// マグニチュード
         m_ThreadInfo.message += magnitude.isEmpty() ? QString("マグニチュードの情報なし") + "\n" : QString(magnitude + "\n");
@@ -586,18 +605,34 @@ int Worker::FormattingThreadInfo()
         m_ThreadInfo.message += QString("震源の深さ : %1").arg(depth + "\n");
 
         /// 地震発生時刻
-        auto originTime     = m_Info.m_Time.isEmpty() ? QString("") : QString("地震発生時刻 : %1").arg(m_Info.m_Time + "\n\n");
-        m_ThreadInfo.message += originTime;
+        if (m_Info.m_Time.isEmpty()) {
+            m_ThreadInfo.message += QString("") + "\n";
+        }
+        else {
+            auto dateTime    = QDateTime::fromString(m_Info.m_Time, "yyyy/MM/dd HH:mm:ss");
+            QString convertTime;
+
+            if (dateTime.time().second() == 0) convertTime = dateTime.toString("yyyy年M月d日 h時m分頃");  // 秒の部分が00の場合
+            else convertTime = dateTime.toString("yyyy年M月d日 h時m分s秒");                               // 秒の部分が00以外の場合
+
+            m_ThreadInfo.message += QString("地震発生時刻 : %1").arg(convertTime + "\n\n");
+        }
 
         /// 緯度
-        auto latitude = m_Info.m_Latitude.compare("-200", Qt::CaseSensitive) != 0 ?
-                            QString("緯度 : %1度").arg(m_Info.m_Latitude) : QString("緯度 : 情報なし");
-        m_ThreadInfo.message += latitude + "\n";
+        if (m_Info.m_Latitude.compare("-200", Qt::CaseInsensitive) == 0 || m_Info.m_Latitude.compare("-200.0", Qt::CaseInsensitive) == 0) {
+            m_ThreadInfo.message += QString("緯度 : 情報なし") + "\n";
+        }
+        else {
+            m_ThreadInfo.message += QString("北緯 : %1度").arg(m_Info.m_Latitude) + "\n";
+        }
 
         /// 経度
-        auto longitude = m_Info.m_Longitude.compare("-200", Qt::CaseSensitive) != 0 ?
-                            QString("経度 : %1度").arg(m_Info.m_Longitude) : QString("経度 : 情報なし");
-        m_ThreadInfo.message += longitude + QString("\n\n");
+        if (m_Info.m_Longitude.compare("-200", Qt::CaseInsensitive) == 0 || m_Info.m_Longitude.compare("-200.0", Qt::CaseInsensitive) == 0) {
+            m_ThreadInfo.message += QString("経度 : 情報なし") + "\n";
+        }
+        else {
+            m_ThreadInfo.message += QString("東経 : %1度").arg(m_Info.m_Longitude) + "\n\n";
+        }
 
         /// 発生した地震の地域
         /// 現在の仕様では、最大で7つのエリアまで表示する
@@ -1142,14 +1177,29 @@ int EarthQuakeAlert::addInfo(const QString &fileName)
 
     // 緊急地震速報(警報)の情報を追加
     QFile File(fileName);
-    if (!File.open(QIODevice::Append | QIODevice::Text)) {
+    if (!File.open(QIODevice::ReadOnly | QIODevice::Text)) {
         std::cerr << QString("エラー : 地震情報のファイルオープンに失敗 %1").arg(File.errorString()).toStdString() << std::endl;
         return -1;
     }
 
     try {
+        // ファイル内容を読み込む
+        QTextStream in(&File);
+        auto originalContent = in.readAll();
+        File.close();
+
+        // ファイル内容を書き込むために再度ファイルを開く
+        if (!File.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+            std::cerr << QString("エラー : 地震情報のファイルオープンに失敗 %1").arg(File.errorString()).toStdString() << std::endl;
+            return -1;
+        }
+
+        // 新しい地震IDを先頭にして書き込む
         QTextStream out(&File);
-        out << m_ID << "\n";
+        QString newContent = m_ID + "\n" + originalContent;
+        out << newContent;
+
+        // ファイルを閉じる
         File.close();
     }
     catch (QException &ex) {

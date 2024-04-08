@@ -21,7 +21,7 @@ qEQAlertは、P2P地震情報からデータを取得して、0ch系の掲示板
   30[秒]以内の最新情報 (1件のみ)  
   <br>
 * 発生した地震情報 :  
-  5[分]以内の最新情報 (1件のみ)  
+  10[分]以内の最新情報 (1件のみ)  
 <br>
 
 地震情報の詳細は、[P2P地震情報](https://www.p2pquake.net/secondary_use/) をご確認ください。  
@@ -37,8 +37,10 @@ P2P地震情報では、以下のレート制限があります。
 <br>
 
 README.mdでは、Red Hat Enterprise LinuxおよびSUSE Linux Enterprise / openSUSEを前提に記載しております。  
-また、他のLinuxディストリビューションにもインストールして使用できると思います。(Raspberry Pi上での動作は確認済みです)  
+また、他のLinuxディストリビューションにもインストールして使用できると思います。  
 (例: Linux Mint, Manjaro, MX Linux, ... 等)  
+
+Raspberry Pi上での動作は確認済みです。  
 <br>
 
 **注意：**  
@@ -157,7 +159,7 @@ Ninjaビルドを使用する場合は、<code>cmake</code>コマンドに<code>
 
 ## 2.2. Systemdサービスの使用
 
-**<u>ワンショット機能を有効 (<code>oneshot</code>を<code>true</code>にしている場合) にしている場合は、Systemdサービスと連携できないことにご注意ください。</u>**  
+**<u>ワンショット機能を有効 (<code>oneshot</code>を<code>true</code>) にしている場合は、Systemdサービスと連携できないことにご注意ください。</u>**  
 <br>
 
 qEQAlertのSystemdサービスファイルは、  
@@ -299,7 +301,7 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
   デフォルト値 : <code>false</code>  
   緊急地震速報(警報)のデータを取得するかどうかを指定します。  
   現在時刻から30[秒]以内に発令された緊急地震速報の場合のみ取得します。  
-  デフォルト値はfalse (無効) です。  
+  デフォルト値は<code>false</code> (無効) です。  
   <br>
 * alertlog  
   デフォルト値 : <code>/tmp/eqalert.log</code>  
@@ -309,7 +311,7 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
 * info  
   デフォルト値 : <code>true</code>  
   発生した地震情報のデータを取得するかどうかを指定します。  
-  現在時刻から5[分]以内に起きた地震情報の場合のみ取得します。  
+  現在時刻から10[分]以内に起きた地震情報の場合のみ取得します。  
   デフォルト値はtrue (有効) です。  
   <br>
 * infolog  
@@ -354,8 +356,9 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
   <br>
   スレッドタイトルの文字数に制限がある場合は、この値を<code>false</code>にしてください。  
   <br>
-  <code>true</code>の例 : 【緊急地震速報】<震源地名> Mx.x 発現時刻 hh:mm:ss 強い揺れに警戒  
-  <code>false</code>の例 : 【緊急地震速報】<震源地名> Mx.x 強い揺れに警戒  
+  <code>true</code>の時のスレッドタイトル例 : 【緊急地震速報】<震源地名> Mx.x 発現時刻 hh:mm:ss 強い揺れに警戒  
+  <code>false</code>の時のスレッドタイトル例 : 【緊急地震速報】<震源地名> Mx.x 強い揺れに警戒  
+  <br>
 * requesturl  
   デフォルト値 : 空欄  
   地震情報を書き込むため、POSTデータを送信するURLを指定します。  
