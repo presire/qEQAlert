@@ -30,6 +30,11 @@ private:  // Variables
     THREAD_INFO                             m_ThreadInfo;   // 地震情報を書き込むスレッドの情報
 
     // 地震の情報
+    int                                     m_iGetInfo;         // 地震情報を取得するWebサイト
+                                                                // 0 : JMA (気象庁)
+                                                                // 1 : P2P地震情報
+    QString                                 m_EQAlertURL,       // 緊急地震速報(警報)を取得するURL
+                                            m_EQInfoURL;        // 発生した地震情報を取得するURL
     bool                                    m_bEQAlert,         // 緊急地震速報(警報)の有効 / 無効
                                             m_bEQInfo;          // 発生した地震情報の有効 / 無効
     int                                     m_AlertScale,       // 緊急地震速報(警報)における震度の閾値 (この震度以上の場合は新規スレッドを作成する)
@@ -38,6 +43,8 @@ private:  // Variables
     QString                                 m_AlertFile,        // 緊急地震速報(警報)のIDを保存するファイルパス
                                             m_InfoFile;         // 発生した地震情報のIDを保存するファイルパス
     bool                                    m_EQsubTime;        // 緊急地震地震速報で新規スレッドを作成する場合、スレッドタイトルに地震発現(到達)時刻を記載するかどうか
+    QString                                 m_ExpiredXPath;     // スレッドの生存を判断するときに使用するXPath
+                                                                // デフォルトは、"/html/head/title"タグを取得する
     bool                                    m_EQchangeTitle;    // 発生した地震情報のスレッドのタイトルを変更するかどうか
                                                                 // 防弾嫌儲およびニュース速報(Libre)等のスレッドのタイトルが変更できる掲示板で使用可能
     QTimer                                  m_EQTimer;          // 地震の情報を取得するためのインターバル時間をトリガとするタイマ

@@ -28,10 +28,12 @@ private:  // Methods
 
 public:   // Methods
     explicit HtmlFetcher(QObject *parent = nullptr);
-     ~HtmlFetcher() override;
+    ~HtmlFetcher() override;
     int     fetch(const QUrl &url, bool redirect, const QString &_xpath,            // Webページにアクセスして、特定の属性を取得する
                   bool bShiftJIS = false);
     int     extractThreadPath(const QString &htmlContent, const QString &bbs);      // 新規作成したスレッドからスレッドのパスおよびスレッド番号を抽出する
+    int     fetchLastThreadNum(const QUrl &url, bool redirect,                      // 書き込むスレッドの最後尾のレス番号を取得する
+                               const QString &_xpath, int elementType);
 
     [[nodiscard]] QString GetThreadPath() const;                                    // スレッドのパスを取得する
     [[nodiscard]] QString GetThreadNum() const;                                     // スレッド番号を取得する

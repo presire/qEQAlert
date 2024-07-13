@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(qEQAlert VERSION 0.1.2 LANGUAGES CXX)
+project(qEQAlert VERSION 0.2.0 LANGUAGES CXX)
 
 
 # Linuxのみビルドを許可
@@ -61,12 +61,13 @@ link_directories(${LIBXML2_LIBRARY_DIRS})
 
 
 # pkg-configを使用してQtライブラリを検索
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Network)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Network Xml)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network Xml)
 
 ## Qtのpkg-configファイル
 pkg_check_modules(QT_CORE     Qt${QT_VERSION_MAJOR}Core REQUIRED IMPORTED_TARGET)
 pkg_check_modules(QT_NETWORK  Qt${QT_VERSION_MAJOR}Network REQUIRED IMPORTED_TARGET)
+pkg_check_modules(QT_XML      Qt${QT_VERSION_MAJOR}Xml REQUIRED IMPORTED_TARGET)
 
 ## Qt 5.15未満はビルドエラー
 #set(QT_MINIMUM_VERSION 5.15)
@@ -90,12 +91,12 @@ target_compile_definitions(qEQAlert PRIVATE
         $<$<CONFIG:Debug>:_DEBUG>
 )
 
-## バージョンが0.1.0未満の場合、_BELOW_0_1_0プリプロセッサを定義
-if(PROJECT_VERSION VERSION_LESS 0.1.0)
-    target_compile_definitions(qEQAlert PRIVATE
-        _BELOW_0_1_0
-    )
-endif()
+target_compile_definitions(qEQAlert PRIVATE
+    -DQEQALERT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    -DQEQALERT_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    -DQEQALERT_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+)
+
 
 ## ARMまたはAARCH64かどうかを確認
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
@@ -134,6 +135,7 @@ target_include_directories(qEQAlert PRIVATE
 target_link_libraries(qEQAlert
         Qt${QT_VERSION_MAJOR}::Core
         Qt${QT_VERSION_MAJOR}::Network
+        Qt${QT_VERSION_MAJOR}::Xml
         ${LIBXML2_LIBRARIES}
 )
 

@@ -5,7 +5,7 @@ URL : https://github.com/presire/qEQAlert
 <br>
 
 # はじめに  
-qEQAlertは、P2P地震情報からデータを取得して、0ch系の掲示板に書き込むソフトウェアです。  
+qEQAlertは、気象庁 (JMA) あるいはP2P地震情報からデータを取得して、0ch系の掲示板に書き込むソフトウェアです。  
 
 緊急地震速報(警報)では、常に新規スレッドを自動作成します。  
 これは、緊急地震速報(警報)は緊急性が必要であり、既存のスレッドに書き込むと、  
@@ -46,6 +46,9 @@ Raspberry Pi上での動作は確認済みです。
 **注意：**  
 **ただし、本ソフトウェアはリアルタイム性を保証できないため、緊急地震速報(警報)の機能の使用は非推奨としております。**  
 
+**version 0.2.0以降の設定ファイル (JSONファイル) は、version 0.1.2以前の設定ファイルと構造が異なります。**  
+**そのため、以前のバージョンの設定ファイルをversion 0.2.0以降で使い回すことが出来ないことに注意してください。**  
+
 **また、ご要望があれば、逐次開発を進めていく予定です。**  
 <br>
 <br>
@@ -55,6 +58,7 @@ Raspberry Pi上での動作は確認済みです。
 
 * Qt5 Core
 * Qt5 Network
+* Qt5 Xml
   * <https://www.qt.io/>  
   * qEQAlertは、Qtライブラリを使用しています。
   * 本ソフトウェアで使用しているQtライブラリは、LGPL v3オープンソースライセンスの下で利用可能です。  
@@ -82,12 +86,12 @@ Raspberry Pi上での動作は確認済みです。
     sudo zypper update  
     sudo zypper install make cmake gcc gcc-c++ libxml2-devel        \  
                         libqt5-qtbase-common-devel libQt5Core-devel \  
-                        libQt5Network-devel  
+                        libQt5Network-devel libQt5Xml-devel  
 
     # Debian GNU/Linux, Raspberry Pi OS  
     sudo apt update && sudo apt upgrade  
     sudo apt install make cmake gcc libxml2 libxml2-dev \  
-                     qtbase5-dev  
+                     qtbase5-dev libqt5xmlpatterns5-dev  
 <br>
 <br>
 
@@ -297,47 +301,155 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
 各設定の説明を記載します。  
 <br>
 
-* alert  
+* earthquake
+  * alert  
+    デフォルト値 : <code>false</code>  
+    緊急地震速報(警報)のデータを取得するかどうかを指定します。  
+    現在時刻から30[秒]以内に発令された緊急地震速報の場合のみ取得します。  
+    デフォルト値は<code>false</code> (無効) です。  
+    <br>
+  * alerturl  
+    * p2p  
+      デフォルト値 : <code>"https://api.p2pquake.net/v2/history?codes=556&limit=1&offset=0"</code>  
+      <br>
+      緊急地震速報(警報)を取得するURLを指定します。  
+      現在の仕様では、P2P地震情報からのみ緊急地震速報(警報)を取得することができます。  
+      <br>
+  * alertlog  
+    デフォルト値 : <code>/tmp/eqalert.log</code>  
+    緊急地震速報(警報)の地震IDを保存するログファイルのパスを指定します。  
+    これは、同じ地震情報を取得して新規スレッドを作成することがないように保存しています。  
+    <br>
+  * info  
+    デフォルト値 : <code>true</code>  
+    発生した地震情報のデータを取得するかどうかを指定します。  
+    現在時刻から10[分]以内に起きた地震情報の場合のみ取得します。  
+    デフォルト値はtrue (有効) です。  
+    <br>
+  * infourl  
+    * jma  
+      デフォルト値 : <code>"https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml"</code>  
+      <br>
+      発生した地震情報を取得する気象庁 (JMA) のURLを指定します。  
+      **気象庁から発生した地震情報を取得する場合は、<code>get</code>キーを<code>0</code>に設定する必要があります。**  
+      <br>
+    * p2p  
+      デフォルト値 : <code>"https://api.p2pquake.net/v2/history?codes=551&limit=1&offset=0"</code>  
+      <br>
+      発生した地震情報から取得するP2P地震情報のURLを指定します。  
+      **P2P地震情報から発生した地震情報を取得する場合は、<code>get</code>キーを<code>1</code>に設定する必要があります。**  
+      <br>
+  * infolog  
+    デフォルト値 : <code>/tmp/eqinfo.log</code>  
+    発生した地震情報の地震IDや立てたスレッドの情報を保存するログファイルのパスを指定します。  
+    これは、地震情報によりスレッドを制御するための情報を保存しています。  
+    <br>
+  * alertscale / infoscale  
+    デフォルト値 : <code>50</code>  
+    地震情報を書き込むための基準となる震度を指定します。  
+    指定可能な値以外を指定した場合は、強制的に50 (震度5強) に設定されます。  
+    <br>
+    <code>alertscale</code>は緊急地震速報、<code>infoscale</code>は発生した地震情報の設定です。  
+    <br>
+    デフォルト値は50 (震度5強) です。  
+    <br>
+    指定できる値は、以下の通りです。  
+    10 (震度1)
+    20 (震度2)
+    30 (震度3)
+    40 (震度4)
+    45 (震度5弱)
+    50 (震度5強)
+    55 (震度6弱)
+    60 (震度6強)
+    70 (震度7)  
+    <br>
+  * get  
+    デフォルト値 : <code>0</code>  
+    JMA (気象庁)、または、P2P地震情報のどちらからデータを取得するかどうかを判別します。  
+    <br>
+    <code>0</code>の場合 : JMA (気象庁) からデータを取得します。  
+    <code>1</code>の場合 : P2P地震情報からデータを取得します。  
+    <br>
+  * alerturl  
+    デフォルト値 : <code>https://api.p2pquake.net/v2/history?codes=556&limit=1&offset=0</code>  
+    緊急地震速報(警報)のデータを取得するURLを指定します。  
+    <br>
+    現在、緊急地震速報(警報)では、P2P地震情報からのデータのみ取得できます。  
+    <br>
+  * infourl  
+    デフォルト値 : <code>https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml</code>  
+    発生した地震情報のデータを取得するURLを指定します。  
+    <br>
+    JMA(気象庁)からデータを取得する場合 :  
+    <code>https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml</code>  
+    <br>
+    P2P地震情報からデータを取得する場合 :  
+    <code>https://api.p2pquake.net/v2/history?codes=551&limit=1&offset=0</code>  
+    <br>
+* thread
+  * from  
+    デフォルト値 : <code>佐藤</code>  
+    地震情報を書き込む時の名前欄を指定します。  
+    POSTデータとして送信します。  
+    <br>
+  * mail  
+    デフォルト値 : 空欄  
+    地震情報を書き込む時のメール欄を指定します。  
+    POSTデータとして送信します。  
+    <br>
+  * bbs  
+    デフォルト値 : 空欄  
+    掲示板のBBS名を指定します。  
+    POSTデータとして送信します。  
+    書き込み時に必須です。  
+    <br>
+  * shiftjis  
+    デフォルト値 : <code>true</code>  
+    POSTデータの文字コードをShift-JISに変換するかどうかを指定します。  
+    0ch系は、Shift-JISを指定 (<code>**true**</code>) することを推奨します。  
+    <br>
+  * requesturl  
+    デフォルト値 : 空欄  
+    地震情報を書き込むため、POSTデータを送信するURLを指定します。  
+    <br>
+    0ch系の掲示板では、以下のようなURLが多いです。  
+    * <code>**http(s)://<ドメイン名>/test/bbs.cgi**</code>  
+    * <code>**http(s)://<ドメイン名>/test/bbs.cgi?guid=ON**</code>  
+
+    <br>
+
+    書き込み時に必須です。  
+    <br>
+  * chtt  
+    デフォルト値 : <code>false</code>  
+    スレッドタイトルを最新の地震情報のタイトルに変更します。  
+    地震情報を既存のスレッドに書き込む時、本文の先頭に!chttという文字列を付加して、POSTデータとして送信します。  
+    <br>
+    <u>防弾嫌儲系の掲示板において、<code>!chtt</code>コマンドが使用できる場合に有効です。</u>  
+    <br>
+  * subjecttime  
+    デフォルト値 : <code>true</code>  
+    **<u>緊急地震速報</u>** で新規スレッドを作成する場合、スレッドタイトルに地震発現(到達)時刻を記載するかどうかを指定します。  
+    この値が<code>true</code>の場合、スレッドタイトルに **<u>発現時刻 hh:mm:ss</u>** という文字列が付加されます。  
+    <br>
+    スレッドタイトルの文字数に制限がある場合は、この値を<code>false</code>にしてください。  
+    <br>
+    <code>true</code>の時のスレッドタイトル例 : 【緊急地震速報】<震源地名> Mx.x 発現時刻 hh:mm:ss 強い揺れに警戒  
+    <code>false</code>の時のスレッドタイトル例 : 【緊急地震速報】<震源地名> Mx.x 強い揺れに警戒  
+    <br>
+  * expiredxpath  
+    デフォルト値 : <code>"/html/head/title"</code>  
+    スレッドの生存を判断するときに使用するXPathです。  
+    ログファイルに保存されているスレッドタイトルと現在のスレッドタイトルを比較する時に使用します。<br>
+    <br>
+* oneshot  
   デフォルト値 : <code>false</code>  
-  緊急地震速報(警報)のデータを取得するかどうかを指定します。  
-  現在時刻から30[秒]以内に発令された緊急地震速報の場合のみ取得します。  
-  デフォルト値は<code>false</code> (無効) です。  
+  タイマ (<code>interval</code>キーの値を使用) を使用して、地震情報を自動取得するかどうかを指定します。  
   <br>
-* alertlog  
-  デフォルト値 : <code>/tmp/eqalert.log</code>  
-  緊急地震速報(警報)の地震IDを保存するログファイルのパスを指定します。  
-  これは、同じ地震情報を取得して新規スレッドを作成することがないように保存しています。  
-  <br>
-* info  
-  デフォルト値 : <code>true</code>  
-  発生した地震情報のデータを取得するかどうかを指定します。  
-  現在時刻から10[分]以内に起きた地震情報の場合のみ取得します。  
-  デフォルト値はtrue (有効) です。  
-  <br>
-* infolog  
-  デフォルト値 : <code>/tmp/eqinfo.log</code>  
-  発生した地震情報の地震IDや立てたスレッドの情報を保存するログファイルのパスを指定します。  
-  これは、地震情報によりスレッドを制御するための情報を保存しています。  
-  <br>
-* alertscale / infoscale  
-  デフォルト値 : <code>50</code>  
-  地震情報を書き込むための基準となる震度を指定します。  
-  指定可能な値以外を指定した場合は、強制的に50 (震度5強) に設定されます。  
-  <br>
-  <code>alertscale</code>は緊急地震速報、<code>infoscale</code>は発生した地震情報の設定です。  
-  <br>
-  デフォルト値は50 (震度5強) です。  
-  <br>
-  指定できる値は、以下の通りです。  
-  10 (震度1)
-  20 (震度2)
-  30 (震度3)
-  40 (震度4)
-  45 (震度5弱)
-  50 (震度5強)
-  55 (震度6弱)
-  60 (震度6強)
-  70 (震度7)  
+  Cronを使用して本ソフトウェアをワンショットで実行する場合は、この値を<code>true</code>に指定します。  
+  つまり、<code>true</code>に指定する場合、本ソフトウェアをワンショットで実行して、地震情報を1度だけ自動取得することができます。  
+  例えば、Systemdサービスが使用できない環境 (Cronのみが使用できる環境) 等で使用します。  
   <br>
 * interval  
   デフォルト値 : <code>10</code>  
@@ -348,64 +460,6 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
   <br>
   <u>ただし、P2P地震情報では、1分間に60リクエストまでというレート制限があります。</u>  
   <u>それを超えるとレスポンスが遅くなったり拒否 (HTTP ステータスコード 429) される場合があります。</u>  
-  <br>
-* subjecttime  
-  デフォルト値 : <code>true</code>  
-  **<u>緊急地震速報</u>** で新規スレッドを作成する場合、スレッドタイトルに地震発現(到達)時刻を記載するかどうかを指定します。  
-  この値が<code>true</code>の場合、スレッドタイトルに **<u>発現時刻 hh:mm:ss</u>** という文字列が付加されます。  
-  <br>
-  スレッドタイトルの文字数に制限がある場合は、この値を<code>false</code>にしてください。  
-  <br>
-  <code>true</code>の時のスレッドタイトル例 : 【緊急地震速報】<震源地名> Mx.x 発現時刻 hh:mm:ss 強い揺れに警戒  
-  <code>false</code>の時のスレッドタイトル例 : 【緊急地震速報】<震源地名> Mx.x 強い揺れに警戒  
-  <br>
-* requesturl  
-  デフォルト値 : 空欄  
-  地震情報を書き込むため、POSTデータを送信するURLを指定します。  
-  <br>
-  0ch系の掲示板では、以下のようなURLが多いです。  
-  * <code>**http(s)://<ドメイン名>/test/bbs.cgi**</code>  
-  * <code>**http(s)://<ドメイン名>/test/bbs.cgi?guid=ON**</code>  
-
-  <br>
-
-  書き込み時に必須です。  
-  <br>
-* from  
-  デフォルト値 : <code>佐藤</code>  
-  地震情報を書き込む時の名前欄を指定します。  
-  POSTデータとして送信します。  
-  <br>
-* mail  
-  デフォルト値 : 空欄  
-  地震情報を書き込む時のメール欄を指定します。  
-  POSTデータとして送信します。  
-  <br>
-* bbs  
-  デフォルト値 : 空欄  
-  掲示板のBBS名を指定します。  
-  POSTデータとして送信します。  
-  書き込み時に必須です。  
-  <br>
-* shiftjis  
-  デフォルト値 : <code>true</code>  
-  POSTデータの文字コードをShift-JISに変換するかどうかを指定します。  
-  0ch系は、Shift-JISを指定 (<code>**true**</code>) することを推奨します。  
-  <br>
-* chtt  
-  デフォルト値 : <code>false</code>  
-  スレッドタイトルを最新の地震情報のタイトルに変更します。  
-  地震情報を既存のスレッドに書き込む時、本文の先頭に!chttという文字列を付加して、POSTデータとして送信します。  
-  <br>
-  <u>防弾嫌儲系の掲示板において、<code>!chtt</code>コマンドが使用できる場合に有効です。</u>  
-  <br>
-* oneshot  
-  デフォルト値 : <code>false</code>  
-  タイマ (<code>interval</code>キーの値を使用) を使用して、地震情報を自動取得するかどうかを指定します。  
-  <br>
-  Cronを使用して本ソフトウェアをワンショットで実行する場合は、この値を<code>true</code>に指定します。  
-  つまり、<code>true</code>に指定する場合、本ソフトウェアをワンショットで実行して、地震情報を1度だけ自動取得することができます。  
-  例えば、Systemdサービスが使用できない環境 (Cronのみが使用できる環境) 等で使用します。  
 
 <br>
 
@@ -414,16 +468,27 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
             "alert": false,
             "alertlog": "/tmp/eqalert.log",
             "alertscale": 50,
-            "bbs": "",
-            "chtt": false,
-            "from": "佐藤",
+            "alerturl": {
+                "p2p": "https://api.p2pquake.net/v2/history?codes=556&limit=1&offset=0"
+            },
+            "get": 0,
             "info": true,
             "infolog": "/tmp/eqinfo.log",
             "infoscale": 50,
-            "interval": 10,
+            "infourl": {
+                "jma": "https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml",
+                "p2p": "https://api.p2pquake.net/v2/history?codes=551&limit=1&offset=0"
+            }
+        },
+        "interval": 10,
+        "oneshot": false,
+        "thread": {
+            "bbs": "",
+            "chtt": false,
+            "expiredxpath": "/html/head/title",
+            "from": "佐藤",
             "mail": "",
-            "oneshot": false,
-            "requesturl": ""
+            "requesturl": "",
             "shiftjis": true,
             "subjecttime": true
         }
@@ -472,6 +537,8 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
             "id": [
                 "65f8e803d616be440743cffc"
             ],
+            "prefs": "北海道",  
+            "reportdatetime": "2024-06-09T03:24:00+09:00",  
             "thread": "1710837545",
             "title": "【地震】十勝沖 震度2 M4.6",
             "url": "https://www.example.com/test/read.cgi/sample/1710837545/"
@@ -483,9 +550,23 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
                 "65f967c6d616be440743cffe",
                 "65f967c6d616be440743cffd"
             ],
+            "prefs": "石川県",  
+            "reportdatetime": "2024-06-09T03:24:00+09:00",  
             "thread": "1710858633",
             "title": "【地震】石川県能登地方 震度1 M3.2",
             "url": "https://www.example.com/test/read.cgi/sample/1710858633/"
+        }
+        {
+            "date": "2024/06/16 19:35:00",
+            "hypocentre": "千葉県北西部",
+            "id": [
+                "20240616193512"
+            ],
+            "prefs": "千葉県,東京都,神奈川県",
+            "reportdatetime": "2024-06-16T19:38:00+09:00",
+            "thread": "1710902547",
+            "title": "【地震】千葉県北西部 震度2 M4.1",
+            "url": "https://www.example.com/test/read.cgi/sample/1710902547/"
         }
     ]
 

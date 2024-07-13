@@ -176,8 +176,9 @@ void Runner::fetch()
         m_pEarthQuake.reset(nullptr);
     }
 
-    m_pEarthQuake = std::make_unique<EarthQuake>(m_bEQAlert, m_bEQInfo, m_AlertScale, m_InfoScale, m_AlertFile, m_InfoFile,
-                                                 m_RequestURL, m_EQsubTime, m_EQchangeTitle, m_ThreadInfo, this);
+    m_pEarthQuake = std::make_unique<EarthQuake>(m_iGetInfo, m_EQAlertURL, m_EQInfoURL,
+                                                 m_bEQAlert, m_bEQInfo, m_AlertScale, m_InfoScale, m_AlertFile, m_InfoFile,
+                                                 m_RequestURL, m_EQsubTime, m_EQchangeTitle, m_ThreadInfo, m_ExpiredXPath, this);
 
     // 実行
     [[maybe_unused]] auto ret = m_pEarthQuake->EQProcess();
@@ -239,12 +240,34 @@ int Runner::getConfiguration(QString &filepath)
         // 緊急地震速報(警報)および発生した地震情報を取得するかどうか
         QJsonObject earthquakeObj = JsonObject.value("earthquake").toObject();
 
-        // メンバ変数m_EQIntervalの値を使用して自動的に地震情報を取得するかどうか
-        // ワンショット機能の有効 / 無効
-        m_bOneShot       =  earthquakeObj.value("oneshot").toBool(false);
+        // 地震情報を取得するWebサイトを選択
+        // 0 : JMA (気象庁), 1 : P2P地震情報
+        m_iGetInfo = earthquakeObj.value("get").toInt();
+        if (m_iGetInfo != 0 && m_iGetInfo != 1) {
+            std::cerr << QString("\"get\"キーの値が不正です\n0または1を指定してください").toStdString() << std::endl;
+            return -1;
+        }
 
-        // POSTデータを送信するURL
-        m_RequestURL            = earthquakeObj.value("requesturl").toString("");
+        // 緊急地震速報(警報)を取得するURL
+        // 現在の仕様では、緊急地震速報(警報)はP2P地震情報から取得する
+        QJsonObject alertURLObj = earthquakeObj.value("alerturl").toObject();
+        if (m_iGetInfo == 0)      m_EQAlertURL = alertURLObj.value("p2p").toString("");
+        else if (m_iGetInfo == 1) m_EQAlertURL = alertURLObj.value("p2p").toString("");
+
+        if (m_EQAlertURL.isEmpty()) {
+            std::cerr << QString("\"alerturl\"キーの値が空欄です\n緊急地震速報(警報)を取得するURLを指定してください").toStdString() << std::endl;
+            return -1;
+        }
+
+        // 発生した地震情報を取得するURL
+        QJsonObject infoURLObj = earthquakeObj.value("infourl").toObject();
+        if (m_iGetInfo == 0)      m_EQInfoURL = infoURLObj.value("jma").toString("");
+        else if (m_iGetInfo == 1) m_EQInfoURL = infoURLObj.value("p2p").toString("");
+
+        if (m_EQInfoURL.isEmpty()) {
+            std::cerr << QString("\"infourl\"キーの値が空欄です\n発生した地震情報を取得するURLを指定してください").toStdString() << std::endl;
+            return -1;
+        }
 
         // 緊急地震速報(警報)の有効 / 無効
         m_bEQAlert = earthquakeObj.value("alert").toBool(false);
@@ -317,19 +340,6 @@ int Runner::getConfiguration(QString &filepath)
             }
         }
 
-        // ワンショット機能が有効の場合、タイマ割り込みの設定
-        if (!m_bOneShot) {
-            // 地震情報の取得の時間間隔が5秒未満、または、60秒を超える場合は、強制的に10秒に設定
-            m_EQInterval = earthquakeObj.value("interval").toInt(10);
-            if (m_EQInterval < 5 || m_EQInterval > 60) {
-                std::cout << QString("地震情報の取得間隔が不正です 設定値 : %1").arg(m_EQInterval).toStdString() << std::endl;
-                std::cout << QString("強制的に10[秒]に設定されます").toStdString() << std::endl;
-
-                m_EQInterval = 10;
-            }
-            m_EQInterval *= 1000;
-        }
-
         // 震度の閾値
         const std::set<int> allowedScale = {10, 20, 30, 40, 45, 50, 55, 60, 70};
 
@@ -349,26 +359,52 @@ int Runner::getConfiguration(QString &filepath)
             m_InfoScale = 50;
         }
 
+        // メンバ変数m_EQIntervalの値を使用して自動的に地震情報を取得するかどうか
+        // ワンショット機能の有効 / 無効
+        m_bOneShot = JsonObject.value("oneshot").toBool(false);
+
+        // ワンショット機能が有効の場合、タイマ割り込みの設定
+        if (!m_bOneShot) {
+            // 地震情報の取得の時間間隔が5秒未満、または、60秒を超える場合は、強制的に10秒に設定
+            m_EQInterval = JsonObject.value("interval").toInt(10);
+            if (m_EQInterval < 5 || m_EQInterval > 60) {
+                std::cout << QString("地震情報の取得間隔が不正です 設定値 : %1").arg(m_EQInterval).toStdString() << std::endl;
+                std::cout << QString("強制的に10[秒]に設定されます").toStdString() << std::endl;
+
+                m_EQInterval = 10;
+            }
+            m_EQInterval *= 1000;
+        }
+
         // スレッド情報の設定
+        QJsonObject threadObj = JsonObject.value("thread").toObject();
+
+        /// POSTデータを送信するURL
+        m_RequestURL          = threadObj.value("requesturl").toString("");
+
         /// 地震情報で新規スレッドを作成するための名前欄
-        m_ThreadInfo.from     = earthquakeObj.value("from").toString("佐藤");
+        m_ThreadInfo.from     = threadObj.value("from").toString("佐藤");
 
         /// スレッドに入力するメール欄
-        m_ThreadInfo.mail     = earthquakeObj.value("mail").toString("");
+        m_ThreadInfo.mail     = threadObj.value("mail").toString("");
 
         /// BBS名
-        m_ThreadInfo.bbs      = earthquakeObj.value("bbs").toString("");
+        m_ThreadInfo.bbs      = threadObj.value("bbs").toString("");
 
         /// Shift-JISの有効 / 無効
-        m_ThreadInfo.shiftjis         = earthquakeObj.value("shiftjis").toBool(true);
+        m_ThreadInfo.shiftjis = threadObj.value("shiftjis").toBool(true);
 
-        // 緊急地震地震速報で新規スレッドを作成する場合、スレッドタイトルに地震発現(到達)時刻を記載するかどうか
-        // trueの場合、スレッドタイトルに"発現時刻 hh:mm:ss"という文字列が付加される
-        m_EQsubTime = earthquakeObj.value("subjecttime").toBool("true");
+        /// 緊急地震地震速報で新規スレッドを作成する場合、スレッドタイトルに地震発現(到達)時刻を記載するかどうか
+        /// trueの場合、スレッドタイトルに"発現時刻 hh:mm:ss"という文字列が付加される
+        m_EQsubTime         = threadObj.value("subjecttime").toBool("true");
 
-        // 発生した地震情報において、既存のスレッドに書き込む場合、スレッドのタイトルを変更するかどうか
-        // この機能は、防弾嫌儲およびニュース速報(Libre)等のスレッドタイトルが変更できる掲示板で使用可能
-        m_EQchangeTitle    = earthquakeObj.value("chtt").toBool(false);
+        /// スレッドの生存を判断するときに使用するXPath
+        /// デフォルトは、"/html/head/title"タグを取得する
+        m_ExpiredXPath      = threadObj.value("expiredxpath").toString("/html/head/title");
+
+        /// 発生した地震情報において、既存のスレッドに書き込む場合、スレッドのタイトルを変更するかどうか
+        /// この機能は、防弾嫌儲およびニュース速報(Libre)等のスレッドタイトルが変更できる掲示板で使用可能
+        m_EQchangeTitle     = threadObj.value("chtt").toBool(false);
     }
     catch(QException &ex) {
         std::cerr << QString("エラー : %1").arg(ex.what()).toStdString() << std::endl;

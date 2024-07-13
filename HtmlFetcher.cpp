@@ -39,6 +39,14 @@ int HtmlFetcher::fetch(const QUrl &url, bool redirect, const QString &_xpath, bo
 int HtmlFetcher::fetchElement(QNetworkReply *reply, const QString &_xpath, bool bShiftJIS)
 {
     if (reply->error() != QNetworkReply::NoError) {
+        // ステータスコードの確認
+        int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (statusCode == 404) {
+            // 該当スレッドが存在しない(落ちている)場合
+            reply->deleteLater();
+            return 1;
+        }
+
         std::cerr << "エラー : " << reply->errorString().toStdString();
         reply->deleteLater();
 
@@ -63,7 +71,7 @@ int HtmlFetcher::fetchElement(QNetworkReply *reply, const QString &_xpath, bool 
     // libxml2ではエンコーディングの自動判定において問題があるため、エンコーディングを明示的に指定する
     xmlDocPtr doc = htmlReadDoc((const xmlChar*)htmlContent.toStdString().c_str(), nullptr, "UTF-8", HTML_PARSE_RECOVER | HTML_PARSE_NOERROR | HTML_PARSE_NOWARNING);
     if (doc == nullptr) {
-        std::cerr << "Document not parsed successfully" << std::endl;
+         std::cerr << QString("エラー: スレッドURLからHTMLのパースに失敗しました").toStdString() << std::endl;
         reply->deleteLater();
 
         return -1;
@@ -73,7 +81,7 @@ int HtmlFetcher::fetchElement(QNetworkReply *reply, const QString &_xpath, bool 
     auto *xpath = xmlStrdup((const xmlChar*)_xpath.toUtf8().constData());
     xmlXPathObjectPtr result = getNodeset(doc, xpath);
     if (result == nullptr) {
-        std::cerr << "Error in getNodeset" << std::endl;
+        std::cerr << QString("エラー: スレッドURLからノードの取得に失敗しました").toStdString() << std::endl;
         xmlFreeDoc(doc);
         reply->deleteLater();
 
@@ -210,6 +218,90 @@ int HtmlFetcher::extractThreadPath(const QString &htmlContent, const QString &bb
 
     // スレッドのパスおよびスレッド番号の取得に失敗した場合はエラーとする
     if (m_ThreadPath.isEmpty() && m_ThreadNum.isEmpty()) return -1;
+
+    return 0;
+}
+
+
+// 書き込むスレッドの最後尾のレス番号を取得する
+int HtmlFetcher::fetchLastThreadNum(const QUrl &url, bool redirect, const QString &_xpath, int elementType)
+{
+    // リダイレクトを自動的にフォロー
+    QNetworkRequest request(url);
+
+    if (redirect) {
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, true);
+    }
+
+    auto pReply = m_pManager->get(request);
+
+    // レスポンス待機
+    QEventLoop loop;
+    QObject::connect(pReply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    // レスポンスの取得
+    if (pReply->error() != QNetworkReply::NoError) {
+        std::cerr << QString("エラー : %1").arg(pReply->errorString()).toStdString() << std::endl;
+                                                                                                 pReply->deleteLater();
+
+        return -1;
+    }
+
+    QString htmlContent = pReply->readAll();
+
+    // libxml2の初期化
+    xmlInitParser();
+    LIBXML_TEST_VERSION
+
+            // 文字列からHTMLドキュメントをパース
+            // libxml2ではエンコーディングの自動判定において問題があるため、エンコーディングを明示的に指定する
+            xmlDocPtr doc = htmlReadDoc((const xmlChar*)htmlContent.toStdString().c_str(), nullptr, "UTF-8", HTML_PARSE_RECOVER | HTML_PARSE_NOERROR | HTML_PARSE_NOWARNING);
+    if (doc == nullptr) {
+        std::cerr << QString("エラー : HTMLドキュメントのパースに失敗").toStdString() << std::endl;
+        pReply->deleteLater();
+
+        return -1;
+    }
+
+    // XPathで特定の要素を検索
+    auto *xpath = xmlStrdup((const xmlChar*)_xpath.toUtf8().constData());
+    xmlXPathObjectPtr result = getNodeset(doc, xpath);
+    if (result == nullptr) {
+        std::cerr << QString("エラー : ノードの取得に失敗").toStdString() << std::endl;
+                         xmlFreeDoc(doc);
+        pReply->deleteLater();
+
+        return -1;
+    }
+
+    // 結果のノードセットから最後尾のレス番号を取得
+    m_Element.clear();
+    xmlNodeSetPtr nodeset = result->nodesetval;
+
+    /// 最後尾のノードセットを取得する
+    xmlNodePtr cur = nodeset->nodeTab[nodeset->nodeNr - 1]->xmlChildrenNode;
+    if (cur->type == elementType) {
+        auto buffer = QString(((const char*)cur->content));
+        m_Element.append(buffer);
+    }
+    else {
+        /// XPathで取得したノードセットが最後尾に1つ多く取得される場合があるため、最後尾から1つ前のノードセットを取得する
+        cur = nodeset->nodeTab[nodeset->nodeNr - 2]->xmlChildrenNode;
+        if (cur->type == elementType) {
+            auto buffer = QString(((const char*)cur->content));
+            m_Element.append(buffer);
+        }
+    }
+
+    // libxml2オブジェクトの破棄
+    xmlXPathFreeObject(result);
+    xmlFreeDoc(doc);
+
+    // libxml2のクリーンアップ
+    xmlCleanupParser();
+
+    pReply->deleteLater();
 
     return 0;
 }
