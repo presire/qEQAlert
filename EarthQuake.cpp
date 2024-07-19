@@ -1592,7 +1592,7 @@ bool Worker::isExistThread(const QUrl &url, const QString &title)
     /// 正規表現を定義（スペースを含む [ と ] の間に任意の文字列があるパターン）
     /// 0ch掲示板の設定でスレッドタイトルにIDが付加される場合がある
     /// そのため、そのIDを除去したスレッドのタイトルを抽出する
-    static const QRegularExpression RegEx(".+ \\[.*\\]$");
+    static const QRegularExpression RegEx(" \\[.*\\]$");
 
     /// 文字列からパターンに一致する部分を削除
     ExistThread = ExistThread.remove(RegEx);
