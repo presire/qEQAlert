@@ -51,6 +51,71 @@ int Poster::replyCookieFinished(QNetworkReply *reply)
 }
 
 
+// 新規スレッドを作成する
+int Poster::PostforCreateThread(const QUrl &url, THREAD_INFO &ThreadInfo)
+{
+    // リクエストの作成
+    QNetworkRequest request(url);
+
+    // POSTデータの生成 (<form>タグの<input>要素に基づいてデータを設定)
+    // 新規スレッドを作成する場合は、<input>要素のname属性の値"key"を除去する必要がある
+    QTextCodec *codec;                  // Shift-JIS用エンコードオブジェクト
+    QByteArray encodedPostData = {};    // エンコードされたバイト列
+
+    if (!ThreadInfo.shiftjis) {
+        // UTF-8用 (QUrlQueryクラスはShift-JISに非対応)
+        QUrlQuery query;
+
+        query.addQueryItem("subject",   ThreadInfo.subject);    // スレッドタイトル名 (スレッドを立てる場合は入力する)
+        query.addQueryItem("FROM",      ThreadInfo.from);
+        query.addQueryItem("mail",      ThreadInfo.mail);       // メール欄
+        query.addQueryItem("MESSAGE",   ThreadInfo.message);    // 書き込む内容
+        query.addQueryItem("bbs",       ThreadInfo.bbs);        // BBS名
+        query.addQueryItem("time",      ThreadInfo.time);       // エポックタイム (UNIXタイムまたはPOSIXタイム)
+
+        encodedPostData = query.toString(QUrl::FullyEncoded).toUtf8();  // POSTデータをバイト列へ変換
+    }
+    else {
+        // Shift-JIS用
+        QString postMessage = QString("subject=%1&FROM=%2&mail=%3&MESSAGE=%4&bbs=%5&time=%6")
+                                  .arg(ThreadInfo.subject,  // スレッドのタイトル (スレッドを立てる場合のみ入力)
+                                       ThreadInfo.from,
+                                       ThreadInfo.mail,     // メール欄
+                                       ThreadInfo.message,  // 書き込む内容
+                                       ThreadInfo.bbs,      // BBS名
+                                       ThreadInfo.time      // エポックタイム (UNIXタイムまたはPOSIXタイム)
+                                       );
+        auto postData   = postMessage.toUtf8();             // POSTデータをバイト列へ変換
+
+        // POSTデータの文字コードをShift-JISへエンコード
+        codec           = QTextCodec::codecForName("Shift-JIS");
+        encodedPostData = codec->fromUnicode(postData);
+    }
+
+    // ContentTypeHeaderをHTTPリクエストに設定
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+    request.setHeader(QNetworkRequest::ContentLengthHeader, QString::number(encodedPostData.length()));
+
+    // クッキーをHTTPリクエストに設定
+    QVariant var;
+    var.setValue(m_Cookies);
+    request.setHeader(QNetworkRequest::CookieHeader, var);
+
+    // レスポンス待機の設定
+    QEventLoop loop;
+    connect(m_pManager.get(), &QNetworkAccessManager::finished, &loop, &QEventLoop::quit);
+
+    // HTTPリクエストの送信
+    auto pReply = m_pManager->post(request, encodedPostData);
+
+    // レスポンス待機
+    loop.exec();
+
+    // レスポンス情報の取得
+    return replyPostFinished(pReply, url, ThreadInfo);
+}
+
+
 // 特定のスレッドに書き込む
 int Poster::PostforWriteThread(const QUrl &url, THREAD_INFO &ThreadInfo)
 {
@@ -115,71 +180,6 @@ int Poster::PostforWriteThread(const QUrl &url, THREAD_INFO &ThreadInfo)
 
     // レスポンス情報の取得
     return replyPostFinished(pReply, ThreadInfo);
-}
-
-
-// 新規スレッドを作成する
-int Poster::PostforCreateThread(const QUrl &url, THREAD_INFO &ThreadInfo)
-{
-    // リクエストの作成
-    QNetworkRequest request(url);
-
-    // POSTデータの生成 (<form>タグの<input>要素に基づいてデータを設定)
-    // 新規スレッドを作成する場合は、<input>要素のname属性の値"key"を除去する必要がある
-    QTextCodec *codec;                  // Shift-JIS用エンコードオブジェクト
-    QByteArray encodedPostData = {};    // エンコードされたバイト列
-
-    if (!ThreadInfo.shiftjis) {
-        // UTF-8用 (QUrlQueryクラスはShift-JISに非対応)
-        QUrlQuery query;
-
-        query.addQueryItem("subject",   ThreadInfo.subject);    // スレッドタイトル名 (スレッドを立てる場合は入力する)
-        query.addQueryItem("FROM",      ThreadInfo.from);
-        query.addQueryItem("mail",      ThreadInfo.mail);       // メール欄
-        query.addQueryItem("MESSAGE",   ThreadInfo.message);    // 書き込む内容
-        query.addQueryItem("bbs",       ThreadInfo.bbs);        // BBS名
-        query.addQueryItem("time",      ThreadInfo.time);       // エポックタイム (UNIXタイムまたはPOSIXタイム)
-
-        encodedPostData = query.toString(QUrl::FullyEncoded).toUtf8();  // POSTデータをバイト列へ変換
-    }
-    else {
-        // Shift-JIS用
-        QString postMessage = QString("subject=%1&FROM=%2&mail=%3&MESSAGE=%4&bbs=%5&time=%6")
-                                  .arg(ThreadInfo.subject,  // スレッドのタイトル (スレッドを立てる場合のみ入力)
-                                       ThreadInfo.from,
-                                       ThreadInfo.mail,     // メール欄
-                                       ThreadInfo.message,  // 書き込む内容
-                                       ThreadInfo.bbs,      // BBS名
-                                       ThreadInfo.time      // エポックタイム (UNIXタイムまたはPOSIXタイム)
-                                       );
-        auto postData   = postMessage.toUtf8();             // POSTデータをバイト列へ変換
-
-        // POSTデータの文字コードをShift-JISへエンコード
-        codec           = QTextCodec::codecForName("Shift-JIS");
-        encodedPostData = codec->fromUnicode(postData);
-    }
-
-    // ContentTypeHeaderをHTTPリクエストに設定
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
-    request.setHeader(QNetworkRequest::ContentLengthHeader, QString::number(encodedPostData.length()));
-
-    // クッキーをHTTPリクエストに設定
-    QVariant var;
-    var.setValue(m_Cookies);
-    request.setHeader(QNetworkRequest::CookieHeader, var);
-
-    // レスポンス待機の設定
-    QEventLoop loop;
-    connect(m_pManager.get(), &QNetworkAccessManager::finished, &loop, &QEventLoop::quit);
-
-    // HTTPリクエストの送信
-    auto pReply = m_pManager->post(request, encodedPostData);
-
-    // レスポンス待機
-    loop.exec();
-
-    // レスポンス情報の取得
-    return replyPostFinished(pReply, url, ThreadInfo);
 }
 
 

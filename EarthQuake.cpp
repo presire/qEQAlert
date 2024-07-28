@@ -216,8 +216,9 @@ int Worker::ProcessEQInfo()
 
             // ログファイルの更新
             if (m_CommonData.bChangeTitle) {
+                // !chttコマンドが有効の場合
                 // スレッドのタイトルが変更されているかどうかを確認
-                if (!CompareThreadTitle(QUrl(m_InfoLog.ThreadURL), m_ThreadInfo.subject)) {
+                if (!CompareThreadTitle(QUrl(m_InfoLog.ThreadURL), m_InfoLog.Title)) {
                     // スレッドのタイトルが変更された場合 (!chttコマンドが成功した場合)
                     // 変更されたスレッドのタイトル、地震ID、地震発生日時を地震情報のログファイルに追加・更新
                     if (!m_Info.m_ID.isEmpty()) {
@@ -234,6 +235,7 @@ int Worker::ProcessEQInfo()
                 }
             }
             else {
+                // !chttコマンドが無効の場合
                 // 地震IDおよび地震発生日時を地震情報のログファイルに追加・更新
                 if (!m_Info.m_ID.isEmpty()) {
                     if (m_Info.UpdateInfo(m_CommonData.LogFile, false, "", m_CommonData.iGetInfo)) return -1;
@@ -259,12 +261,12 @@ int Worker::ProcessEQInfo()
 
             // 地震ID、地震発生日時、スレッド情報を地震情報のログファイルに新規保存
             if (!m_Info.m_ID.isEmpty()) {
-                if (m_Info.AddInfo(m_CommonData.LogFile, m_ThreadInfo.subject, m_InfoLog.ThreadURL, m_InfoLog.ThreadNum, m_CommonData.iGetInfo)) return -1;
+                if (m_Info.AddInfo(m_CommonData.LogFile, m_InfoLog.Title, m_InfoLog.ThreadURL, m_InfoLog.ThreadNum, m_CommonData.iGetInfo)) return -1;
             }
         }
     }
     else {
-        // 地震情報のログファイルに同じ震源地が存在しない場合
+        // 地震情報のログファイルに同じ震源地(都道府県)が存在しない場合
 
         // スレッドを新規作成する
         if (Post(m_Info.m_Code)) {
@@ -274,7 +276,7 @@ int Worker::ProcessEQInfo()
 
         // 地震ID、地震発生日時、スレッド情報を地震情報のログファイルに新規保存
         if (!m_Info.m_ID.isEmpty()) {
-            if (m_Info.AddInfo(m_CommonData.LogFile, m_ThreadInfo.subject, m_InfoLog.ThreadURL, m_InfoLog.ThreadNum, m_CommonData.iGetInfo)) return -1;
+            if (m_Info.AddInfo(m_CommonData.LogFile, m_InfoLog.Title, m_InfoLog.ThreadURL, m_InfoLog.ThreadNum, m_CommonData.iGetInfo)) return -1;
         }
     }
 
@@ -1066,7 +1068,7 @@ int Worker::FormattingThreadInfo()
 
         /// 経度
         if (m_Info.m_Longitude.compare("-200", Qt::CaseInsensitive) == 0 || m_Info.m_Longitude.compare("-200.0", Qt::CaseInsensitive) == 0) {
-            m_ThreadInfo.message += QString("経度 : 情報なし") + "\n";
+            m_ThreadInfo.message += QString("経度 : 情報なし") + "\n\n";
         }
         else {
             m_ThreadInfo.message += QString("東経 : %1度").arg(m_Info.m_Longitude) + "\n\n";
@@ -1185,6 +1187,15 @@ int Worker::Post(int EQCode, bool bCreateThread)
         if (EQCode == 551) {
             m_InfoLog.ThreadURL = poster.GetNewThreadURL();
             m_InfoLog.ThreadNum = poster.GetNewThreadNum();
+        }
+
+        // 発生した地震情報の場合、新規作成したスレッドにアクセスしてタイトルを抽出
+        if (EQCode == 551) {
+            HtmlFetcher fetcher(nullptr);
+            if (fetcher.fetch(m_InfoLog.ThreadURL, true, m_CommonData.ExpiredXPath, m_ThreadInfo.shiftjis) == 0) {
+                // 新規作成したスレッドのタイトル抽出に成功した場合
+                m_InfoLog.Title = fetcher.GetElement();
+            }
         }
     }
     else {
@@ -1587,15 +1598,18 @@ bool Worker::isExistThread(const QUrl &url, const QString &title)
     auto ExistThread = fetcher.GetElement();
 
     /// 末尾の半角スペースを削除
-    if (ExistThread.endsWith(" ")) ExistThread.chop(1);
+    /// (現在は使用しない)
+    //if (ExistThread.endsWith(" ")) ExistThread.chop(1);
 
     /// 正規表現を定義（スペースを含む [ と ] の間に任意の文字列があるパターン）
     /// 0ch掲示板の設定でスレッドタイトルにIDが付加される場合がある
     /// そのため、そのIDを除去したスレッドのタイトルを抽出する
-    static const QRegularExpression RegEx(" \\[.*\\]$");
+    /// (現在は使用しない)
+    //static const QRegularExpression RegEx(" \\[.*\\]$");
 
     /// 文字列からパターンに一致する部分を削除
-    ExistThread = ExistThread.remove(RegEx);
+    /// (現在は使用しない)
+    //ExistThread = ExistThread.remove(RegEx);
 
     if (ExistThread.compare(title, Qt::CaseSensitive) == 0) {
         // 既存のスレッドが生存している場合
@@ -1613,28 +1627,38 @@ bool Worker::isExistThread(const QUrl &url, const QString &title)
 // -1 : スレッドのタイトルの取得に失敗した場合
 int Worker::CompareThreadTitle(const QUrl &url, const QString &title)
 {
-    // 過去のスレッドタイトルと変更後のスレッドタイトルが同一の場合
-    if (title.compare(m_InfoLog.Title, Qt::CaseSensitive) == 0) return 0;
-
-    // スレッドから<title>タグをXPathを使用して抽出する
+    // 過去に作成したスレッドから<title>タグをXPathを使用して抽出する
     HtmlFetcher fetcher(this);
     if (fetcher.fetch(url, true, m_CommonData.ExpiredXPath, m_ThreadInfo.shiftjis)) {
         // <title>タグの取得に失敗した場合
         return -1;
     }
 
+    // ログファイルに保存しているスレッドタイトルと同じスレッドタイトルか存在するかどうかを確認する
+    // これは、スレッドが生存していない場合でもHTTPレスポンスが200(成功)を返す可能性があるためである
     auto ThreadTitle = fetcher.GetElement();
 
+    /// 末尾の半角スペースを削除
+    /// (現在は使用しない)
+    //if (ThreadTitle.endsWith(" ")) ThreadTitle.chop(1);
+
     /// 正規表現を定義（スペースを含む [ と ] の間に任意の文字列があるパターン）
-    static const QRegularExpression RegEx(" \\[.*\\]$");
+    /// (現在は使用しない)
+    //static const QRegularExpression RegEx(" \\[.*\\]$");
 
     /// 文字列からパターンに一致する部分を削除
-    ThreadTitle = ThreadTitle.remove(RegEx);
+    /// (現在は使用しない)
+    //ThreadTitle = ThreadTitle.remove(RegEx);
 
     if (ThreadTitle.compare(title, Qt::CaseSensitive) == 0) {
         // スレッドのタイトルが変更されていない場合
         // !chttコマンドが失敗している場合
         return 1;
+    }
+    else {
+        // スレッドのタイトルが変更されている場合は、抽出したスレッドのタイトルを使用する
+        // この抽出したタイトル名は、ログファイルの各JSONオブジェクトにある"title"キーへ保存する
+        m_ThreadInfo.subject = ThreadTitle;
     }
 
     return 0;

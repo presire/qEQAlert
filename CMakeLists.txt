@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.15)
-project(qEQAlert VERSION 0.2.1 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.16)
+project(qEQAlert VERSION 0.2.2 LANGUAGES CXX)
 
 
 # Linuxのみビルドを許可
