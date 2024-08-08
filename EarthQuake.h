@@ -142,7 +142,9 @@ public:     // Variables
                                     // WarningIndianWide    : インド洋の広域で津波の可能性がある
                                     // Potential            : 一般にこの規模では津波の可能性がある
     QList<POINT> m_Points;          // 発生した地震の地域
-    QString      m_Text;            // 固定付加文
+    QString      m_Text,            // 固定付加文
+                 m_VarComment,      // その他付加文
+                 m_FreeFormComment; // 自由付加文
     QString      m_ReportDateTime;  // JMAの地震情報の報告日時
     QStringList  m_MaxIntPrefs;     // 最も震度の大きい都道府県
     QMutex       m_Mutex;           // 排他制御用オブジェクト

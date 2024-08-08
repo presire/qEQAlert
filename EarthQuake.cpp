@@ -491,10 +491,30 @@ int Worker::FormattingData_for_JMA()
             QString eventID = headElement.firstChildElement("EventID").text();
             m_Info.m_ID = eventID;
 
-            /// ログファイルにある同じ地震IDの"ReportDateTime"キーの日時が同じ場合は無視する
+            /// ログファイルにある同じ地震IDの"ReportDateTime"キー (報告時刻) の日時が同じ場合は無視する
             auto reportDateTime = headElement.firstChildElement("ReportDateTime").text();
             if (!SearchInfoEQID(eventID, reportDateTime)) {
                 /// "ReportDateTime"キーの日時が同じ場合
+                std::cout << QString("発生した地震情報は記録済みのため無視します").toStdString() << std::endl;
+                return -1;
+            }
+
+            /// 現在時刻と比較して、発生した地震情報の最新情報が10[分]以内かどうかを確認
+            /// 10[分]以内の地震情報の場合は取得
+            /// まず、発生した地震情報の報告時刻を変換
+            QDateTime issueTime     = QDateTime::fromString(reportDateTime, Qt::ISODate);
+            issueTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+
+            /// 次に、現在時刻を取得
+            auto currentTime        = QDateTime::currentDateTime();
+            currentTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+
+            /// 現在時刻と比較して、発生した地震情報の最新情報 (報告時刻) が10[分]以内かどうかを確認
+            /// 10[分]以内の地震情報の場合は取得
+            qint64 diff = static_cast<int>(issueTime.msecsTo(currentTime) / 1000);
+            if (!(diff >= 0 && diff <= 600)) {
+                /// 発生した地震情報において、600[秒](10[分])を超過している場合は無視する
+                std::cout << QString("発生した地震情報は10[分]を超過しているため無視します").toStdString() << std::endl;
                 return -1;
             }
 
@@ -522,17 +542,18 @@ int Worker::FormattingData_for_JMA()
 
                 /// 現在時刻と比較して、発生した地震情報の最新情報が10[分]以内かどうかを確認
                 /// 10[分]以内の地震情報の場合は取得
-                QDateTime issueTime = QDateTime::fromString(originTime, Qt::ISODate);
-                issueTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+                /// (現在は使用しない)
+                // QDateTime issueTime = QDateTime::fromString(originTime, Qt::ISODate);
+                // issueTime.setTimeZone(QTimeZone("Asia/Tokyo"));
 
-                auto currentTime        = QDateTime::currentDateTime();
-                currentTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+                // auto currentTime        = QDateTime::currentDateTime();
+                // currentTime.setTimeZone(QTimeZone("Asia/Tokyo"));
 
-                qint64 diff = static_cast<int>(issueTime.msecsTo(currentTime) / 1000);
-                if (!(diff >= 0 && diff <= 600)) {
-                    /// 発生した地震情報において、600[秒](10[分])を超過している場合は無視する
-                    return -1;
-                }
+                // qint64 diff = static_cast<int>(issueTime.msecsTo(currentTime) / 1000);
+                // if (!(diff >= 0 && diff <= 600)) {
+                //     /// 発生した地震情報において、600[秒](10[分])を超過している場合は無視する
+                //     return -1;
+                // }
 
                 m_Info.m_Time = ConvertDateTimeFormat(originTime);
 
@@ -585,6 +606,7 @@ int Worker::FormattingData_for_JMA()
                     /// ユーザが設定した震度の閾値を確認
                     /// 1つでも閾値以上の地震が各地域で発生した場合は、発生した地震情報を取得
                     if (MaxScale < m_CommonData.InfoScale) {
+                        std::cout << QString("発生した地震情報は、設定した震度より小さいため無視します").toStdString() << std::endl;
                         return -1;
                     }
 
@@ -669,6 +691,24 @@ int Worker::FormattingData_for_JMA()
                     QDomElement textElement = forecastCommentElement.firstChildElement("Text");
                     if (!textElement.isNull()) {
                         m_Info.m_Text = textElement.text();
+                    }
+                }
+
+                // VarCommentタグ
+                QDomElement varCommentElement = commentsElement.firstChildElement("VarComment");
+                if (varCommentElement.attribute("codeType") == "固定付加文") {
+                    QDomElement textElement = varCommentElement.firstChildElement("Text");
+                    if (!textElement.isNull()) {
+                        m_Info.m_VarComment = textElement.text();
+                    }
+                }
+
+                // FreeFormCommentタグ
+                QDomElement freeFormCommentElement = commentsElement.firstChildElement("FreeFormComment");
+                if (freeFormCommentElement.attribute("codeType") == "固定付加文") {
+                    QDomElement textElement = freeFormCommentElement.firstChildElement("Text");
+                    if (!textElement.isNull()) {
+                        m_Info.m_FreeFormComment = textElement.text();
                     }
                 }
             }
@@ -812,18 +852,33 @@ int Worker::FormattingData_for_P2P()
         else if (code == 551) {
             // 発生した地震情報
 
-            /// "earthquake"オブジェクトの"time"キーに対応する値の取得
+            /// "earthquake"オブジェクトの"time"キー (地震発生時刻) に対応する値の取得
             auto earthquakeObject   = obj["earthquake"].toObject();
             auto timeStr            = earthquakeObject["time"].toString();
-            auto issueTime          = QDateTime::fromString(timeStr, "yyyy/MM/dd HH:mm:ss");
+
+            /// ルートオブジェクトの"time"キー (報告時刻) に対応する値の取得
+            auto reportTimeStr      = obj["time"].toString();
+            auto issueTime          = QDateTime::fromString(reportTimeStr, Qt::ISODate);
+            if (issueTime.isValid()) {
+                reportTimeStr       = issueTime.toString("yyyy/MM/dd HH:mm:ss");
+                issueTime           = QDateTime::fromString(reportTimeStr, "yyyy/MM/dd HH:mm:ss");
+                issueTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+            }
+            else {
+                std::cerr << QString("エラー : 発生した地震情報の報告時刻の変換に失敗しました").toStdString() << std::endl;
+                return -1;
+            }
+
+            /// 現在時刻の取得
             auto currentTime        = QDateTime::currentDateTime();
             currentTime.setTimeZone(QTimeZone("Asia/Tokyo"));
 
-            /// 現在時刻と比較して、発生した地震情報の最新情報が10[分]以内かどうかを確認
+            /// 現在時刻と比較して、発生した地震情報の最新情報 (報告時刻) が10[分]以内かどうかを確認
             /// 10[分]以内の地震情報の場合は取得
             qint64 diff = static_cast<int>(issueTime.msecsTo(currentTime) / 1000);
             if (!(diff >= 0 && diff <= 600)) {
-                /// 発生した地震情報において、600[秒](10[分])を超過している場合は無視する
+                /// 発生した地震情報において、報告時刻が600[秒](10[分])を超過している場合は無視する
+                std::cout << QString("発生した地震情報は10[分]を超過しているため無視します").toStdString() << std::endl;
                 continue;
             }
 
@@ -831,6 +886,7 @@ int Worker::FormattingData_for_P2P()
             /// 1つでも閾値以上の地震が各地域で発生した場合は、発生した地震情報を取得
             auto scale = obj["earthquake"].toObject()["maxScale"].toInt(-1);
             if (scale < m_CommonData.InfoScale) {
+                std::cout << QString("発生した地震情報は、設定した震度より小さいため無視します").toStdString() << std::endl;
                 continue;
             }
 
@@ -905,6 +961,9 @@ int Worker::FormattingData_for_P2P()
 
             auto longitude       = hypocenterObj["longitude"].toDouble(0.0f);    // 経度  震源情報が存在しない場合は、-200または-200.0
             m_Info.m_Longitude   = QString::number(longitude, 'f', 1);
+
+            /// 自由付加文 (2024年8月下旬から提供予定)
+            m_Info.m_FreeFormComment = obj["comments"].toObject()["freeFormComment"].toString("");
 
             /// IDを緊急地震速報(警報)のログファイルに保存
             m_Info.m_ID = obj["id"].toString();
@@ -1021,10 +1080,22 @@ int Worker::FormattingThreadInfo()
 #if (QEQALERT_VERSION_MAJOR == 0 && QEQALERT_VERSION_MINOR == 1 && QEQALERT_VERSION_PATCH <= 2)
         //auto name      = !m_Info.m_Name.isEmpty() ? QString("%1").arg(m_Info.m_Name) : QString("");
 #else
-        auto name      = !m_Info.m_Name.isEmpty() ? QString("%1").arg(m_Info.m_Name) :
-                         m_Info.m_MaxIntPrefs.count() > 0 ? m_Info.m_MaxIntPrefs[0] : QString("");
+        /// 震源地 (スレッドのタイトル)
+        /// まだ、震源地の情報が存在しない場合は、最も震度の大きい都道府県群を最大3つ記述する (スレッドのタイトル)
+        QString name = "";
+        if (m_Info.m_Name.isEmpty()) {
+            /// まだ、震源地の情報が存在しない場合
+            name = m_Info.m_MaxIntPrefs.count() > 0 ? m_Info.m_MaxIntPrefs.mid(0, 3).join(" ") : QString("");
+        }
+        else {
+            /// 震源地の情報が存在する場合
+            name = QString("%1").arg(m_Info.m_Name);
+        }
 #endif
+        /// 最大震度 (スレッドのタイトル)
         auto maxscale  = m_Info.m_MaxScale  != "不明" ? QString("震度%1").arg(m_Info.m_MaxScale) : QString("");
+
+        /// マグニチュード (スレッドのタイトル)
         auto magnitude = m_Info.m_Magnitude != "-1" ? QString("M%1").arg(m_Info.m_Magnitude) : QString("");
         m_ThreadInfo.subject = QString("【地震】%1%2%3").arg(name.isEmpty() ? QString("") : name + QString(" "),
                                                             maxscale.isEmpty() ? QString("") : maxscale + QString(" "),
@@ -1110,6 +1181,8 @@ int Worker::FormattingThreadInfo()
                 m_ThreadInfo.message += QString("若干の海面変動が予想されるが、被害の心配なし") + "\n";
             else if (m_Info.m_DomesticTsunami.compare("Watch", Qt::CaseSensitive) == 0)
                 m_ThreadInfo.message += QString("津波注意報") + "\n";
+            else if (m_Info.m_DomesticTsunami.compare("Warning", Qt::CaseSensitive) == 0)
+                m_ThreadInfo.message += QString("大津波警報・津波警報あるいは津波注意報を発表中") + "\n";
         }
 
         /// 海外での津波の有無
@@ -1143,6 +1216,16 @@ int Worker::FormattingThreadInfo()
             m_ThreadInfo.message += "\n" + m_Info.m_Text + "\n";
         }
 
+        // 固定付加文その他 1
+        if (!m_Info.m_VarComment.isEmpty()) {
+            m_ThreadInfo.message += "\n" + m_Info.m_VarComment + "\n";
+        }
+
+        // 固定付加文その他 2
+        if (!m_Info.m_FreeFormComment.isEmpty()) {
+            m_ThreadInfo.message += "\n" + m_Info.m_FreeFormComment + "\n";
+        }
+
         // 震源地情報が無い場合は、その後の情報を追加書き込みする可能性が高い
         // そのため、以下に示す文言を追加する
         if (m_Info.m_Name.isEmpty()) {
@@ -1152,7 +1235,7 @@ int Worker::FormattingThreadInfo()
         // 参照元の情報を追記
         if (m_CommonData.iGetInfo == 0) {
             // JMA (気象庁) から取得している場合
-            m_ThreadInfo.message += "\n参照元 : " + QString("Atomフィード (高頻度フィード)\n%1").arg(m_CommonData.EQInfoURL);
+            m_ThreadInfo.message += "\n" + QString("参照元 : Atomフィード (高頻度フィード)") + "\n" + m_CommonData.EQInfoURL;
         }
     }
 
@@ -2246,16 +2329,33 @@ int EarthQuakeInfo::UpdateInfo(const QString &fileName, bool bChangeTitle, const
                         // 震源地("hypocentre"キー)を更新
                         obj["hypocentre"] = m_Name;
 
+                        // 発生した地震情報の最も震度の大きい都道府県群("prefs"キー)を更新
+                        obj["prefs"]      = m_MaxIntPrefs.join(",");
+
                         // 地震発生日時("date"キー)を更新
-                        obj["date"] = m_Time;
+                        obj["date"]       = m_Time;
 
                         // JMA (気象庁) からデータを取得する場合、地震情報の報告日時("reportdatetime"キー)を更新
                         if (GetInfo == 0) {
                             obj["reportdatetime"] = m_ReportDateTime;
                         }
 
+                        // JMAからデータを取得する場合、同じ地震ID("id"キー配列)が存在するかどうかを確認して、存在しなければ追加
                         // P2P地震情報からデータを取得する場合、地震ID("id"キー配列)を追加
-                        if (GetInfo == 1) {
+                        if (GetInfo == 0) {
+                            QJsonArray idArray = obj["id"].toArray();
+
+                            QStringList ids = {};
+                            for (const QJsonValue &value : idArray) {
+                                if (value.isString()) ids.append(value.toString());
+                            }
+
+                            if (!ids.contains(m_ID)) {
+                                idArray.append(m_ID);
+                                obj["id"] = idArray;
+                            }
+                        }
+                        else if (GetInfo == 1) {
                             QJsonArray idArray = obj["id"].toArray();
                             idArray.append(m_ID);
                             obj["id"] = idArray;
