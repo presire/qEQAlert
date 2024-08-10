@@ -103,6 +103,7 @@ public:     // Variables
                                     // 551 : 地震の情報
                                     // 556 : 緊急地震速報(警報)の情報
     QString     m_ID;               // 地震情報のID
+    QString     m_Headline;         // 地震情報に関する速報テキスト (JMA専用)
     QString     m_Name;             // 震源地
     QString     m_Depth,            // 震源の深さ
                                     // 0の場合は、"ごく浅い"を表す

@@ -336,7 +336,8 @@ int Worker::onEQDownloaded_for_JMA()
                         idValue = idElement.text();
 
                         // <id>タグの値に"VXSE"という文字列が含まれているかどうかを確認する
-                        // "VXSE51"あるいは"VXSE53"という文字列が含まれている場合は、それが発生した地震情報のURLである
+                        // "VXSE51"(震度速報) あるいは "VXSE53"(震源・震度に関する情報) という文字列が含まれている場合は、それが発生した地震情報のURLである
+                        // なお、"VXSE52"(震源速報) はフォーマットが異なる部分も多いため、取得しない
                         if (idValue.contains("VXSE51", Qt::CaseSensitive) || idValue.contains("VXSE53", Qt::CaseSensitive)) {
                             // JMAから地震情報(XML)を取得する
                             pReply->deleteLater();
@@ -518,6 +519,27 @@ int Worker::FormattingData_for_JMA()
                 return -1;
             }
 
+            /// 地震情報のヘッドラインを取得
+            /// 本文の先頭に記載 : "【タイトル】ヘッドラインの文章"形式
+            QDomElement headLineElement = headElement.firstChildElement("Headline");
+            if (!headLineElement.isNull()) {
+                auto headLineKind = headElement.firstChildElement("Title").text();
+                auto headLineText = headLineElement.firstChildElement("Text").text();
+
+                /// 先頭の全角スペースと半角スペースを除去
+                static QRegularExpression RegEx("^[　 ]+");
+                headLineText.remove(RegEx);
+
+                if (!headLineKind.isEmpty()) {
+                    m_Info.m_Headline  = QString("【%1】").arg(headLineKind);
+                }
+
+                if (!headLineText.isEmpty()) {
+                    m_Info.m_Headline +=  headLineKind.isEmpty() ? QString("") : QString("\n");
+                    m_Info.m_Headline +=  headLineText;
+                }
+            }
+
             /// JMAの地震情報の報告日時を取得
             m_Info.m_ReportDateTime = reportDateTime;
 
@@ -529,6 +551,11 @@ int Worker::FormattingData_for_JMA()
         else {
             return -1;
         }
+
+        m_Info.m_Latitude  = "-200";
+        m_Info.m_Longitude = "-200";
+        m_Info.m_Depth     = "-1";
+        m_Info.m_Magnitude = "-1";
 
         // Bodyタグ
         QDomElement bodyElement = root.firstChildElement("Body");
@@ -542,7 +569,7 @@ int Worker::FormattingData_for_JMA()
 
                 /// 現在時刻と比較して、発生した地震情報の最新情報が10[分]以内かどうかを確認
                 /// 10[分]以内の地震情報の場合は取得
-                /// (現在は使用しない)
+                /// (現在はbodyタグの情報は使用しない)
                 // QDateTime issueTime = QDateTime::fromString(originTime, Qt::ISODate);
                 // issueTime.setTimeZone(QTimeZone("Asia/Tokyo"));
 
@@ -558,41 +585,42 @@ int Worker::FormattingData_for_JMA()
                 m_Info.m_Time = ConvertDateTimeFormat(originTime);
 
                 // 震源地、震源の深さ、緯度、経度を取得する
-                m_Info.m_Latitude  = "-200";
-                m_Info.m_Longitude = "-200";
-                m_Info.m_Depth     = "-1";
-
                 // Hypocenterタグ
                 QDomElement hypocenterElement = earthquakeElement.firstChildElement("Hypocenter");
                 if (!hypocenterElement.isNull()) {
                     // Areaタグ
                     QDomElement areaElement = hypocenterElement.firstChildElement("Area");
                     if (!areaElement.isNull()) {
-                        // Nameタグの値を取得する
-                        m_Info.m_Name = areaElement.firstChildElement("Name").text();
+                        // Nameタグ (震源地) の値を取得する
+                        // なお、発生直後の地震情報には、震源地が記載されていない場合が多い
+                        if (!areaElement.firstChildElement("Name").isNull()) {
+                            m_Info.m_Name = areaElement.firstChildElement("Name").text();
+                        }
 
-                        // jmx_eb:Coordinateタグの値を取得する
-                        QString coordinate = areaElement.firstChildElement("jmx_eb:Coordinate").text();
+                        // jmx_eb:Coordinateタグ (緯度・経度および震源の深さ) の値を取得する
+                        // なお、発生直後の地震情報には、緯度・経度および震源の深さが記載されていない場合が多い
+                        if (!areaElement.firstChildElement("jmx_eb:Coordinate").isNull()) {
+                            QString coordinate = areaElement.firstChildElement("jmx_eb:Coordinate").text();
 
-                        /// 文字列から '/' を削除
-                        coordinate.remove('/');
+                            /// 文字列から '/' を削除
+                            coordinate.remove('/');
 
-                        /// '+' と '-' で文字列を分割
-                        QStringList parts = coordinate.split(QRegExp("[+-]"), Qt::SkipEmptyParts);
+                            /// '+' と '-' で文字列を分割
+                            QStringList parts = coordinate.split(QRegExp("[+-]"), Qt::SkipEmptyParts);
 
-                        if (parts.size() == 3) {
-                            m_Info.m_Latitude  = QString::number(parts[0].toDouble(), 'f', 1);
-                            m_Info.m_Longitude = QString::number(parts[1].toDouble(), 'f', 1);
-                            m_Info.m_Depth     = QString::number(static_cast<int>(parts[2].toDouble()) / 1000, 10);
+                            if (parts.size() == 3) {
+                                m_Info.m_Latitude  = QString::number(parts[0].toDouble(), 'f', 1);
+                                m_Info.m_Longitude = QString::number(parts[1].toDouble(), 'f', 1);
+                                m_Info.m_Depth     = QString::number(static_cast<int>(parts[2].toDouble()) / 1000, 10);
+                            }
                         }
                     }
                 }
 
-                // マグニチュードを取得する
-                // jmx_eb:Magnitudeタグの値を取得する
-                auto magnitude = earthquakeElement.firstChildElement("jmx_eb:Magnitude").text();
-                if (magnitude.isEmpty()) m_Info.m_Magnitude = "-1";
-                else                     m_Info.m_Magnitude = magnitude;
+                // jmx_eb:Magnitudeタグ (マグニチュード) の値を取得する
+                if (!earthquakeElement.firstChildElement("jmx_eb:Magnitude").isNull()) {
+                    m_Info.m_Magnitude = earthquakeElement.firstChildElement("jmx_eb:Magnitude").text();
+                }
             }
 
             // Intensityタグ
@@ -1102,6 +1130,11 @@ int Worker::FormattingThreadInfo()
                                                             magnitude);
 
         // スレッドの内容
+        /// 地震情報のヘッドライン (JMA専用)
+        if (m_CommonData.iGetInfo == 0) {
+            m_ThreadInfo.message  = m_Info.m_Headline.isEmpty() ? QString("") : m_Info.m_Headline + "\n" + "\n";
+        }
+
         /// 震源地
         m_ThreadInfo.message  = name.isEmpty() ? QString("震源地 : 不明") + "\n" : QString("震源地 : %1").arg(name + "\n");
 
@@ -1216,19 +1249,20 @@ int Worker::FormattingThreadInfo()
             m_ThreadInfo.message += "\n" + m_Info.m_Text + "\n";
         }
 
+        // 自由付加文
+        if (!m_Info.m_FreeFormComment.isEmpty()) {
+            m_ThreadInfo.message += "\n" + m_Info.m_FreeFormComment + "\n";
+        }
+
         // 固定付加文その他 1
         if (!m_Info.m_VarComment.isEmpty()) {
             m_ThreadInfo.message += "\n" + m_Info.m_VarComment + "\n";
         }
 
-        // 固定付加文その他 2
-        if (!m_Info.m_FreeFormComment.isEmpty()) {
-            m_ThreadInfo.message += "\n" + m_Info.m_FreeFormComment + "\n";
-        }
-
         // 震源地情報が無い場合は、その後の情報を追加書き込みする可能性が高い
         // そのため、以下に示す文言を追加する
-        if (m_Info.m_Name.isEmpty()) {
+        // ただし、JMAから地震情報を取得する場合は、固定付加文等に文言が存在するため、P2P地震情報のみの場合とする
+        if (m_CommonData.iGetInfo == 1 && m_Info.m_Name.isEmpty()) {
             m_ThreadInfo.message += "\n" + QString("今後の情報に注意してください") + "\n";
         }
 
