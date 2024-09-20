@@ -1,6 +1,5 @@
 #include <QTextCodec>
 #include <iostream>
-#include <regex>
 #include "HtmlFetcher.h"
 
 
@@ -254,9 +253,9 @@ int HtmlFetcher::fetchLastThreadNum(const QUrl &url, bool redirect, const QStrin
     xmlInitParser();
     LIBXML_TEST_VERSION
 
-            // 文字列からHTMLドキュメントをパース
-            // libxml2ではエンコーディングの自動判定において問題があるため、エンコーディングを明示的に指定する
-            xmlDocPtr doc = htmlReadDoc((const xmlChar*)htmlContent.toStdString().c_str(), nullptr, "UTF-8", HTML_PARSE_RECOVER | HTML_PARSE_NOERROR | HTML_PARSE_NOWARNING);
+    // 文字列からHTMLドキュメントをパース
+    // libxml2ではエンコーディングの自動判定において問題があるため、エンコーディングを明示的に指定する
+    xmlDocPtr doc = htmlReadDoc((const xmlChar*)htmlContent.toStdString().c_str(), nullptr, "UTF-8", HTML_PARSE_RECOVER | HTML_PARSE_NOERROR | HTML_PARSE_NOWARNING);
     if (doc == nullptr) {
         std::cerr << QString("エラー : HTMLドキュメントのパースに失敗").toStdString() << std::endl;
         pReply->deleteLater();

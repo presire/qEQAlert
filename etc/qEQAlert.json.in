@@ -15,6 +15,16 @@
             "p2p": "https://api.p2pquake.net/v2/history?codes=551&limit=1&offset=0"
         }
     },
+    "image": {
+        "baseurl": "https://typhoon.yahoo.co.jp",
+        "enable": false,
+        "eqdateformat": "yyyy年M月d日 H時m分ごろ",
+        "eqdetailxpath": "./td",
+        "eqlistxpath": "/html/body/div[@id='wrapper']/div[@id='contents']/div[@id='contents-body']/div[@id='main']/div[@class='yjw_main_md']/div[@id='eqhist']/table[@class='yjw_table yjSt boderset']/descendant::tr[position()>1 and position()<=11]",
+        "equrlxpath": "./a/@href",
+        "imgxpath": "/html/body/div[@id='wrapper']/div[@id='contents']/div[@id='contents-body']/div[@id='main']/div[@id='yjw_keihou']/div[@class='earthquakeView']/div[@id='earthquake-01']/img/@src",
+        "url": "https://typhoon.yahoo.co.jp/weather/jp/earthquake/list/"
+    },
     "interval": 10,
     "oneshot": false,
     "thread": {

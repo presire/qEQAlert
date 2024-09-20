@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.16)
-project(qEQAlert VERSION 0.2.4 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.18)
+project(qEQAlert VERSION 0.3.0 LANGUAGES CXX)
 
 
 # Linuxのみビルドを許可
@@ -60,9 +60,20 @@ include_directories(${LIBXML2_INCLUDE_DIRS})
 link_directories(${LIBXML2_LIBRARY_DIRS})
 
 
-# pkg-configを使用してQtライブラリを検索
+# pkg-configを使用してライブラリを検索
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Network Xml)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network Xml)
+
+if(${QT_VERSION_MAJOR} EQUAL 5)
+    message("Use Qt 5.")
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network Xml)
+elseif(${QT_VERSION_MAJOR} EQUAL 6)
+    message("Use Qt 6.")
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network Xml Core5Compat)
+
+    # OpenSSL 3ライブラリを検索
+    find_package(OpenSSL 3 REQUIRED)
+endif()
+
 
 ## Qtのpkg-configファイル
 pkg_check_modules(QT_CORE     Qt${QT_VERSION_MAJOR}Core REQUIRED IMPORTED_TARGET)
@@ -75,13 +86,14 @@ if(QT_VERSION VERSION_LESS 5.15.0)
     message(FATAL_ERROR "Qt version must be greater than or equal to 5.15.0")
 endif()
 
-
 add_executable(qEQAlert
     main.cpp
     Runner.cpp Runner.h
     EarthQuake.cpp EarthQuake.h
     HtmlFetcher.cpp HtmlFetcher.h
     Poster.cpp Poster.h
+    Image.cpp Image.h
+    CommandLineParser.h CommandLineParser.cpp
 )
 
 
@@ -127,17 +139,42 @@ target_compile_definitions(qEQAlert PRIVATE
 
 
 # libxml2のヘッダファイル
-target_include_directories(qEQAlert PRIVATE
-        ${LIBXML2_INCLUDE_DIRS}
-)
+if(${QT_VERSION_MAJOR} EQUAL 5)
+    target_include_directories(qEQAlert PRIVATE
+            ${LIBXML2_INCLUDE_DIRS}
+    )
+elseif(${QT_VERSION_MAJOR} EQUAL 6)
+    target_include_directories(qEQAlert PRIVATE
+            ${LIBXML2_INCLUDE_DIRS}
+            ${OPENSSL_INCLUDE_DIR}
+    )
+endif()
 
 
-target_link_libraries(qEQAlert
-        Qt${QT_VERSION_MAJOR}::Core
-        Qt${QT_VERSION_MAJOR}::Network
-        Qt${QT_VERSION_MAJOR}::Xml
-        ${LIBXML2_LIBRARIES}
-)
+# target_link_libraries(qEQAlert PRIVATE
+#         Qt${QT_VERSION_MAJOR}::Core
+#         Qt${QT_VERSION_MAJOR}::Network
+#         Qt${QT_VERSION_MAJOR}::Xml
+#         ${LIBXML2_LIBRARIES}
+# )
+if(${QT_VERSION_MAJOR} EQUAL 5)
+    target_link_libraries(qEQAlert PRIVATE
+            Qt${QT_VERSION_MAJOR}::Core
+            Qt${QT_VERSION_MAJOR}::Network
+            Qt${QT_VERSION_MAJOR}::Xml
+            ${LIBXML2_LIBRARIES}
+    )
+elseif(${QT_VERSION_MAJOR} EQUAL 6)
+    target_link_libraries(qEQAlert PRIVATE
+            Qt${QT_VERSION_MAJOR}::Core
+            Qt${QT_VERSION_MAJOR}::Network
+            Qt${QT_VERSION_MAJOR}::Xml
+            Qt${QT_VERSION_MAJOR}::Core5Compat
+            ${LIBXML2_LIBRARIES}
+            OpenSSL::SSL
+            OpenSSL::Crypto
+    )
+endif()
 
 
 # libxml2のコンパイルオプション

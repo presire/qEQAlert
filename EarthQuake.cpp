@@ -9,7 +9,6 @@
 
 [[maybe_unused]] EarthQuake::EarthQuake(QObject *parent) : QObject(parent)
 {
-
 }
 
 
@@ -17,10 +16,11 @@ EarthQuake::EarthQuake(int iGetInfo, QString EQAlertURL, QString EQInfoURL,
                        bool bEQAlert, bool bEQInfo, int AlertScale, int InfoScale, QString AlertFile, QString InfoFile,
                        QString RequestURL, bool bSubjectTime, bool bEQChangeTitle, THREAD_INFO ThreadInfo, QString ExpiredXPath,
                        QObject *parent) :
-    m_iGetInfo(iGetInfo),m_EQAlertURL(EQAlertURL), m_EQInfoURL(EQInfoURL),
+    m_iGetInfo(iGetInfo),m_EQAlertURL(std::move(EQAlertURL)), m_EQInfoURL(std::move(EQInfoURL)),
     m_bEQAlert(bEQAlert), m_bEQInfo(bEQInfo), m_AlertScale(AlertScale), m_InfoScale(InfoScale),
     m_AlertFile(std::move(AlertFile)), m_InfoFile(std::move(InfoFile)), m_RequestURL(std::move(RequestURL)), m_bSubjectTime(bSubjectTime),
-    m_EQchangeTitle(bEQChangeTitle), m_ThreadInfo(std::move(ThreadInfo)), m_ExpiredXPath(ExpiredXPath), QObject{parent}
+    m_EQchangeTitle(bEQChangeTitle), m_ThreadInfo(std::move(ThreadInfo)), m_ExpiredXPath(std::move(ExpiredXPath)),
+    QObject{parent}
 {
 
 }
@@ -29,7 +29,7 @@ EarthQuake::EarthQuake(int iGetInfo, QString EQAlertURL, QString EQInfoURL,
 EarthQuake::~EarthQuake() = default;
 
 
-int EarthQuake::EQProcess()
+int EarthQuake::EQProcess(EQIMAGEINFO &EQImageInfo)
 {
     // 緊急地震速報(警報)の処理を実行
     // 現在は非同期(マルチスレッド)で実行しない
@@ -74,7 +74,7 @@ int EarthQuake::EQProcess()
             m_pEQInfoWorker = std::make_unique<Worker>(data, m_ThreadInfo);
         }
 
-        m_pEQInfoWorker->ProcessEQInfo();
+        m_pEQInfoWorker->ProcessEQInfo(EQImageInfo);
     }
 
     return 0;
@@ -140,7 +140,7 @@ int Worker::ProcessEQAlert()
 
 // 取得したデータを整形およびスレッド情報へ変換後、
 // 既存スレッドに書き込み、または、新規スレッドを作成する (発生した地震情報用)
-int Worker::ProcessEQInfo()
+int Worker::ProcessEQInfo(EQIMAGEINFO &EQImageInfo)
 {
     if (m_CommonData.iGetInfo == 0) {
         // JMA (気象庁) からデータを取得
@@ -175,6 +175,20 @@ int Worker::ProcessEQInfo()
     // 整形したデータをスレッド情報へ変換
     if (FormattingThreadInfo()) {
         return -1;
+    }
+
+    // 発生した地震情報の場合、
+    // Yahoo天気・災害の地震情報一覧にアクセスして、震度分布の画像を検索する
+    // 震度分布の画像が存在する場合は、スレッド本文に画像のURLを追記する
+    if (m_Info.m_Code == 551 && EQImageInfo.bEnable) {
+        EQImageInfo.DateStr = m_Info.m_Time;  // 該当する地震情報の震度画像を取得するための日時
+
+        if (AddEQInfoImage(EQImageInfo) == 0) {
+            m_ThreadInfo.message += m_Info.m_ImageURL.isEmpty() ? QString("") :
+                                                                  QString("\n") + QString("\n") + m_Info.m_ImageURL;
+            m_ThreadInfo.message += m_Info.m_ImageSiteURL.isEmpty() ? QString("") :
+                                                                      QString("\n") + m_Info.m_ImageSiteURL;
+        }
     }
 
 #if (QEQALERT_VERSION_MAJOR == 0 && QEQALERT_VERSION_MINOR == 1 && QEQALERT_VERSION_PATCH <= 2)
@@ -531,11 +545,10 @@ int Worker::FormattingData_for_JMA()
                 headLineText.remove(RegEx);
 
                 if (!headLineKind.isEmpty()) {
-                    m_Info.m_Headline  = QString("【%1】").arg(headLineKind);
+                    m_Info.m_Headline  = QString("【%1】").arg(headLineKind) + QString("\n");
                 }
 
                 if (!headLineText.isEmpty()) {
-                    m_Info.m_Headline +=  headLineKind.isEmpty() ? QString("") : QString("\n");
                     m_Info.m_Headline +=  headLineText;
                 }
             }
@@ -606,7 +619,8 @@ int Worker::FormattingData_for_JMA()
                             coordinate.remove('/');
 
                             /// '+' と '-' で文字列を分割
-                            QStringList parts = coordinate.split(QRegExp("[+-]"), Qt::SkipEmptyParts);
+                            static QRegularExpression RegEx("[+-]");
+                            QStringList parts = coordinate.split(RegEx, Qt::SkipEmptyParts);
 
                             if (parts.size() == 3) {
                                 m_Info.m_Latitude  = QString::number(parts[0].toDouble(), 'f', 1);
@@ -707,6 +721,7 @@ int Worker::FormattingData_for_JMA()
                 }
             }
             else {
+                std::cout << QString("地震速報または震源・震度に関する情報ではないため、このデータを無視します").toStdString() << std::endl;
                 return -1;
             }
 
@@ -1013,7 +1028,7 @@ int Worker::FormattingThreadInfo()
 
         // スレッドのタイトル
         auto name      = !m_Alert.m_Name.isEmpty() ? QString("%1 ").arg(m_Alert.m_Name) : QString("");
-        auto magnitude = m_Alert.m_Magnitude != -1 ? QString("M%1 ").arg(m_Alert.m_Magnitude) : QString("");
+        auto magnitude = m_Alert.m_Magnitude != "-1" ? QString("M%1 ").arg(m_Alert.m_Magnitude) : QString("");
         auto dateTime  = QDateTime::fromString(m_Alert.m_ArrivalTime, "yyyy/MM/dd HH:mm:ss");
         auto timeStr   = dateTime.isValid() && m_CommonData.bSubjectTime ? dateTime.time().toString("HH:mm:ss") : QString("");
         m_ThreadInfo.subject = QString("【緊急地震速報】%1%2%3強い揺れに警戒").arg(name,
@@ -1136,7 +1151,7 @@ int Worker::FormattingThreadInfo()
         }
 
         /// 震源地
-        m_ThreadInfo.message  = name.isEmpty() ? QString("震源地 : 不明") + "\n" : QString("震源地 : %1").arg(name + "\n");
+        m_ThreadInfo.message  = m_Info.m_Name.isEmpty() ? QString("震源地 : 不明") + "\n" : QString("震源地 : %1").arg(m_Info.m_Name + "\n");
 
         /// 震度
         m_ThreadInfo.message += maxscale.isEmpty() ? QString("最大震度情報なし") + "\n" : QString("最大%1").arg(maxscale + "\n");
@@ -1276,6 +1291,33 @@ int Worker::FormattingThreadInfo()
     // 現在時刻をエポックタイムで取得
     auto epocTime = GetEpocTime();
     m_ThreadInfo.time = QString::number(epocTime);
+
+    return 0;
+}
+
+
+// Yahoo天気・災害の地震情報一覧にアクセスして、震度分布の画像を検索・追記する
+int Worker::AddEQInfoImage(EQIMAGEINFO &EQImageInfo)
+{
+    Image EQImage(EQImageInfo);
+
+    // Yahoo天気・災害の地震情報一覧にアクセスして、該当する地震情報を取得
+    if (EQImage.FetchUrl(true, false)) {
+        // 該当する地震情報が存在しない、または、取得に失敗した場合
+        return -1;
+    }
+
+    // 地震分布の画像が存在するURLを生成
+    auto Url = EQImageInfo.BaseUrl + EQImage.GetUrl();
+
+    // 該当する地震情報のURLにアクセスして、震度分布の画像URLを取得
+    if (EQImage.FetchImageUrl(QUrl(Url), true, false)) {
+        // 画像URLの取得に失敗した場合
+        return -1;
+    }
+
+    m_Info.m_ImageSiteURL = Url;
+    m_Info.m_ImageURL     = EQImage.GetImageUrl();
 
     return 0;
 }
@@ -2024,11 +2066,19 @@ QString Worker::ConvertMagnitude(double Magnitude)
 // 本来は整数値であるがシステムの都合で小数点が付加される場合があるため、小数点以下を除去して整数の文字列に変換する
 int Worker::ConvertNumberToInt(const QVariant &value)
 {
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     if (value.type() == QVariant::Int || value.type() == QVariant::LongLong) {
+#else
+    if (value.typeId() == QMetaType::Type::Int || value.typeId() == QMetaType::Type::LongLong) {
+#endif
         // 数値が整数の場合
         return value.toInt();
     }
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     else if (value.type() == QVariant::Double) {
+#else
+    else if (value.typeId() == QMetaType::Type::Double) {
+#endif
         // 数値が浮動小数点の場合
         double number = value.toDouble();
 
@@ -2043,11 +2093,19 @@ int Worker::ConvertNumberToInt(const QVariant &value)
 
 QString Worker::ConvertNumberToString(const QVariant &value)
 {
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     if (value.type() == QVariant::Int || value.type() == QVariant::LongLong) {
+#else
+    if (value.typeId() == QMetaType::Type::Int || value.typeId() == QMetaType::Type::LongLong) {
+#endif
         // 数値が整数の場合
         return value.toString();
     }
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     else if (value.type() == QVariant::Double) {
+#else
+    else if (value.typeId() == QMetaType::Type::Double) {
+#endif
         // 数値が浮動小数点の場合
         double number = value.toDouble();
 
@@ -2380,7 +2438,7 @@ int EarthQuakeInfo::UpdateInfo(const QString &fileName, bool bChangeTitle, const
                             QJsonArray idArray = obj["id"].toArray();
 
                             QStringList ids = {};
-                            for (const QJsonValue &value : idArray) {
+                            for (const auto &value : idArray) {
                                 if (value.isString()) ids.append(value.toString());
                             }
 

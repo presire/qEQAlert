@@ -460,6 +460,45 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
   <br>
   <u>ただし、P2P地震情報では、1分間に60リクエストまでというレート制限があります。</u>  
   <u>それを超えるとレスポンスが遅くなったり拒否 (HTTP ステータスコード 429) される場合があります。</u>  
+  <br>
+* image (実験的な機能)  
+  * enable  
+    デフォルト値 : <code>false</code>  
+    Yahoo災害情報から該当する地震情報の震度分布の画像を取得するかどうかを指定します。  
+    実験的な機能のため、デフォルトでは無効となっています。  
+    <br>
+  * baseurl  
+    デフォルト値 : <code>"https://typhoon.yahoo.co.jp"</code>  
+    Yahoo災害情報から地震画像を取得するための起点となるURLを指定します。  
+    <br>
+  * url  
+    デフォルト値 : <code>"https://typhoon.yahoo.co.jp/weather/jp/earthquake/list/"</code>  
+    Yahoo災害情報の地震情報一覧のURLを指定します。  
+    これは、該当する地震情報を取得するために使用します。  
+    <br>
+  * eqlistxpath  
+    デフォルト値 : <code>"/html/body/div[@id='wrapper']/div[@id='contents']/div[@id='contents-body']/div[@id='main']/div[@class='yjw_main_md']/div[@id='eqhist']/table[@class='yjw_table yjSt boderset']/descendant::tr[position()>1 and position()<=11]"</code>  
+    Yahoo災害情報の地震情報一覧にあるテーブルから、該当する地震情報のURLを取得するためのXPath式を指定します。  
+    <br>
+    XPath式に記述している通り、テーブル先頭の1件目から10件分を抽出して、その中に該当する地震情報が存在するかどうかを確認しています。  
+    この件数を調整する場合は、例えば、5件分だけ抽出する場合は<code>11</code>の箇所を<code>6</code>に変更します。  
+    <br>
+  * eqdetailxpath  
+    デフォルト値 : <code>"./td"</code>  
+    Yahoo災害情報の地震情報一覧にあるテーブルから、テーブル内の要素を取得するためのXPath式を指定します。  
+    <br>
+  * equrlxpath  
+    デフォルト値 : <code>"./a/@href"</code>  
+    Yahoo災害情報の地震情報一覧にあるテーブルから、テーブル内のaタグのhref要素の値を取得するためのXPath式を指定します。  
+    <br>
+  * eqdateformat  
+    デフォルト値 : <code>"yyyy年M月d日 H時m分ごろ"</code>  
+    Yahoo災害情報の地震情報一覧にあるテーブルから、該当する地震情報を取得するために使用する文言を指定します。  
+    <br>
+  * imgxpath  
+    デフォルト値 : <code>"/html/body/div[@id='wrapper']/div[@id='contents']/div[@id='contents-body']/div[@id='main']/div[@id='yjw_keihou']/div[@class='earthquakeView']/div[@id='earthquake-01']/img/@src"</code>  
+    Yahoo災害情報の該当した地震情報のURLから、震度分布の画像のURLを取得するためのXPath式を指定します。  
+    <br>
 
 <br>
 
@@ -479,6 +518,16 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
                 "jma": "https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml",
                 "p2p": "https://api.p2pquake.net/v2/history?codes=551&limit=1&offset=0"
             }
+        },
+        "image": {
+            "baseurl": "https://typhoon.yahoo.co.jp",
+            "enable": false,
+            "eqdateformat": "yyyy年M月d日 H時m分ごろ",
+            "eqdetailxpath": "./td",
+            "eqlistxpath": "/html/body/div[@id='wrapper']/div[@id='contents']/div[@id='contents-body']/div[@id='main']/div[@class='yjw_main_md']/div[@id='eqhist']/table[@class='yjw_table yjSt boderset']/descendant::tr[position()>1 and position()<=11]",
+            "equrlxpath": "./a/@href",
+            "imgxpath": "/html/body/div[@id='wrapper']/div[@id='contents']/div[@id='contents-body']/div[@id='main']/div[@id='yjw_keihou']/div[@class='earthquakeView']/div[@id='earthquake-01']/img/@src",
+            "url": "https://typhoon.yahoo.co.jp/weather/jp/earthquake/list/"
         },
         "interval": 10,
         "oneshot": false,

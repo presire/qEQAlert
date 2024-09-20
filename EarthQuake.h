@@ -15,6 +15,7 @@
 #include <QObject>
 #include <QException>
 #include <memory>
+#include "Image.h"
 #include "Poster.h"
 
 
@@ -147,6 +148,8 @@ public:     // Variables
                  m_VarComment,      // その他付加文
                  m_FreeFormComment; // 自由付加文
     QString      m_ReportDateTime;  // JMAの地震情報の報告日時
+    QString      m_ImageSiteURL;    // 震度分布の画像があるWebページのURL
+    QString      m_ImageURL;        // 震度分布の画像URL
     QStringList  m_MaxIntPrefs;     // 最も震度の大きい都道府県
     QMutex       m_Mutex;           // 排他制御用オブジェクト
 
@@ -221,6 +224,7 @@ private:    // Methods
     int         FormattingData_for_JMA();                                       // JMAから取得した地震情報を整形する
     int         FormattingData_for_P2P();                                       // P2P地震情報から取得した地震情報を整形する
     int         FormattingThreadInfo();                                         // 整形した地震情報のデータをスレッド情報へ整形する
+    int         AddEQInfoImage(EQIMAGEINFO &EQImageInfo);                       // Yahoo天気・災害の地震情報一覧にアクセスして、震度分布の画像を検索・追記する
     int         Post(int EQCode, bool bCreateThread = true);                    // スレッドを新規作成する
     [[nodiscard]] bool  SearchAlertEQID(const QString &ID) const;               // 地震IDを保存しているログファイルから同じ地震IDが存在するかどうかを確認する
     [[nodiscard]] bool  SearchInfoEQID(const QString &ID) const;                // 地震情報のログファイルから同じ地震IDが存在するかどうかを確認する
@@ -245,7 +249,7 @@ private:    // Methods
     static bool sortPoints(const POINT &a, const POINT &b);                     // 震度の大きさで降順ソートする (ただし、-1の場合は無視する)
     [[nodiscard]] static qint64      GetEpocTime();                             // 現在のエポックタイム (UNIX時刻) を秒単位で取得する
     QStringList GetMaxIntPrefs();                                               // 最も震度の大きい都道府県を取得する
-    QString     ConvertDateTimeFormat(const QString &inputDateTime);            // ISO 8601形式の時刻を"yyyy年M月d日 h時m分"形式に変換する
+    static QString ConvertDateTimeFormat(const QString &inputDateTime);         // ISO 8601形式の時刻を"yyyy年M月d日 h時m分"形式に変換する
     template <typename T>
     T           ConvertJMAScale(const QString &strScale);                       // JMAから取得した震度をP2P地震情報の震度の形式に変換する
 
@@ -256,9 +260,9 @@ public:     // Methods
 signals:
 
 public slots:
-    int         ProcessEQAlert();           // 取得したデータを整形およびスレッド情報へ変換後、新規スレッドを作成する (緊急地震速報用)
-    int         ProcessEQInfo();            // 取得したデータを整形およびスレッド情報へ変換後、
-                                            // 既存スレッドに書き込み、または、新規スレッドを作成する (発生した地震情報用)
+    int         ProcessEQAlert();                                               // 取得したデータを整形およびスレッド情報へ変換後、新規スレッドを作成する (緊急地震速報用)
+    int         ProcessEQInfo(EQIMAGEINFO &EQImageInfo);                        // 取得したデータを整形およびスレッド情報へ変換後、
+                                                                                // 既存スレッドに書き込み、または、新規スレッドを作成する (発生した地震情報用)
 };
 
 
@@ -299,7 +303,7 @@ public:     // Methods
                         QString RequestURL, bool bSubjectTime, bool bEQchangeTitle, THREAD_INFO ThreadInfo, QString ExpiredXPath,
                         QObject *parent = nullptr);
     ~EarthQuake() override;
-    int     EQProcess();    // 緊急地震速報(警報)および発生した地震情報を取得して新規スレッドを作成する
+    int     EQProcess(EQIMAGEINFO &EQImageInfo);                // 緊急地震速報(警報)および発生した地震情報を取得して新規スレッドを作成する
 
 signals:
 

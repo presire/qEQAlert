@@ -1,4 +1,6 @@
 #include <QCoreApplication>
+#include <QCommandLineParser>
+#include <QCommandLineOption>
 #include <QFile>
 #include <QDir>
 #include <QJsonDocument>
@@ -9,10 +11,12 @@
 #include <utility>
 #include <set>
 #include "Runner.h"
+#include "CommandLineParser.h"
 
 
 #ifdef Q_OS_LINUX
-Runner::Runner(QStringList _args, QObject *parent) : m_args(std::move(_args)), m_SysConfFile(""), m_EQInterval(10 * 1000),
+Runner::Runner(QCoreApplication &app, QStringList _args, QObject *parent) : m_App(app), m_args(std::move(_args)),
+    m_SysConfFile(""), m_EQInterval(10 * 1000),
     m_pNotifier(std::make_unique<QSocketNotifier>(fileno(stdin), QSocketNotifier::Read, this)), m_stopRequested(false),
     QObject{parent}
 {
@@ -22,7 +26,8 @@ Runner::Runner(QStringList _args, QObject *parent) : m_args(std::move(_args)), m
 
 #elif Q_OS_WIN
 
-Runner::Runner(QStringList _args, QObject *parent) : m_args(std::move(_args)), m_SysConfFile(""), m_interval(30 * 60 * 1000),
+Runner::Runner(QCoreApplication &app, QStringList _args, QObject *parent) : m_App(app), m_args(std::move(_args)),
+    m_SysConfFile(""), m_interval(30 * 60 * 1000),
     m_pNotifier(std::make_unique<QWinEventNotifier>(fileno(stdin), QWinEventNotifier::Read, this)), m_stopRequested(false),
     QObject{parent}
 {
@@ -37,61 +42,119 @@ void Runner::run()
     // メイン処理
 
     // コマンドラインオプションの確認
-    // 設定ファイルおよびバージョン情報
-    m_args.removeFirst();   // プログラムのパスを削除
-    for (auto &arg : m_args) {
-        if(arg.mid(0, 10) == "--sysconf=") {
-            // 設定ファイルのパス
-            auto option = arg;
-            option.replace("--sysconf=", "", Qt::CaseSensitive);
+    // アプリケーションの説明を設定
+    CommandLineParser parser;
+    parser.setApplicationDescription("qEQAlertは、0ch系の掲示板に地震情報を自動的に書き込むソフトウェアです");
 
-            // 先頭と末尾にクォーテーションが存在する場合は取り除く
-            if ((option.startsWith('\"') && option.endsWith('\"')) || (option.startsWith('\'') && option.endsWith('\''))) {
-                option = option.mid(1, option.length() - 2);
-            }
+    // --sysconf オプションを追加
+    QCommandLineOption sysconfOption(QStringList() << "sysconf",
+                                     "設定ファイル(.json)のパスを指定します",
+                                     "confFilePath");
+    parser.addOption(sysconfOption);
 
-            if (getConfiguration(option)) {
-                QCoreApplication::exit();
-                return;
-            }
-            else {
-                m_SysConfFile = option;
-            }
+    // --version / -v オプションを追加
+    QCommandLineOption versionOption(QStringList() << "version" << "v", "バージョン情報を表示します");
+    parser.addOption(versionOption);
 
-            break;
+    // --help / -h オプションを追加
+    QCommandLineOption helpOption(QStringList() << "help" << "h", "ヘルプ情報を表示します");
+    parser.addOption(helpOption);
+
+    // 未知のオプションを許可
+    parser.setOptionsAfterPositionalArgumentsMode(QCommandLineParser::ParseAsOptions);
+
+    // コマンドライン引数を解析
+    parser.process(QCoreApplication::arguments());
+
+    // 未知のオプションをチェック
+    if (!parser.unknownOptionNames().isEmpty()) {
+        std::cerr << QString("エラー : 不明なオプション %1").arg(parser.unknownOptionNames().join(", ")).toStdString() << std::endl;
+        QCoreApplication::exit();
+        return;
+    }
+
+    // 指定されたオプションの数をカウント
+    int optionCount = 0;
+    QString specifiedOption;
+
+    if (parser.isVersionSet()) {
+        optionCount++;
+        specifiedOption = "version";
+    }
+
+    if (parser.isHelpSet()) {
+        optionCount++;
+        specifiedOption = "help";
+    }
+
+    if (parser.isSysConfSet()) {
+        optionCount++;
+        specifiedOption = "sysconf";
+    }
+
+    const QStringList unknownOptions = parser.unknownOptionNames();
+    if (!unknownOptions.isEmpty()) {
+        optionCount += unknownOptions.size();
+        specifiedOption = unknownOptions.first();
+    }
+
+    if (optionCount > 1) {
+        std::cerr << QString("エラー : 指定できるオプションは1つのみです").toStdString() << std::endl;
+        QCoreApplication::exit();
+        return;
+    }
+    else if (optionCount == 0) {
+        std::cerr << QString("エラー : オプションがありません").toStdString() << std::endl;
+        QCoreApplication::exit();
+        return;
+    }
+
+    if (parser.isSet(versionOption)) {
+        // --version / -vオプション
+        auto version = QString("qEQAlert %1.%2.%3\n").arg(PROJECT_VERSION_MAJOR).arg(PROJECT_VERSION_MINOR).arg(PROJECT_VERSION_PATCH)
+                       + QString("ライセンス : UNLICENSE\n")
+                       + QString("ライセンスの詳細な情報は、<http://unlicense.org/> を参照してください\n\n")
+                       + QString("開発者 : Presire with ﾘ* ﾞㇷﾞ)ﾚ の みんな\n\n");
+        std::cout << version.toStdString() << std::endl;
+
+        QCoreApplication::exit();
+        return;
+    }
+    else if (parser.isSet(helpOption)) {
+        // --help / -h オプション
+        auto help = QString("使用法 : qEQAlert [オプション]\n\n")
+                    + QString("  --sysconf=<qEQAlert.jsonファイルのパス>\t\t設定ファイルのパスを指定する\n")
+                    + QString("  -v, -V, --version                    \t\tバージョン情報を表示する\n\n");
+        std::cout << help.toStdString() << std::endl;
+
+        QCoreApplication::exit();
+        return;
+    }
+    else if (parser.isSet(sysconfOption)) {
+        // --sysconfオプションの値を取得
+        auto option = parser.value(sysconfOption);
+
+        // 先頭と末尾にクォーテーションが存在する場合は取り除く
+        if ((option.startsWith('\"') && option.endsWith('\"')) || (option.startsWith('\'') && option.endsWith('\''))) {
+            option = option.mid(1, option.length() - 2);
         }
-        else if (m_args.length() == 1 && (arg.compare("--version", Qt::CaseSensitive) == 0 || arg.compare("-v", Qt::CaseInsensitive) == 0) ) {
-            // バージョン情報
-            auto version = QString("qEQAlert %1.%2.%3\n").arg(PROJECT_VERSION_MAJOR).arg(PROJECT_VERSION_MINOR).arg(PROJECT_VERSION_PATCH)
-                           + QString("ライセンス : UNLICENSE\n")
-                           + QString("ライセンスの詳細な情報は、<http://unlicense.org/> を参照してください\n\n")
-                           + QString("開発者 : presire with ﾘ* ﾞㇷﾞ)ﾚ の みんな\n\n");
-            std::cout << version.toStdString() << std::endl;
+
+        if (option.isEmpty()) {
+            std::cerr << QString("エラー : 設定ファイルのパスが不明です").toStdString() << std::endl;
 
             QCoreApplication::exit();
             return;
         }
-        else if (m_args.length() == 1 && (arg.compare("--help", Qt::CaseSensitive) == 0 || arg.compare("-h", Qt::CaseSensitive) == 0) ) {
-            // ヘルプ
-            auto help = QString("使用法 : qEQAlert [オプション]\n\n")
-                           + QString("  --sysconf=<qEQAlert.jsonファイルのパス>\t\t設定ファイルのパスを指定する\n")
-                           + QString("  -v, -V, --version                      \t\tバージョン情報を表示する\n\n");
-            std::cout << help.toStdString() << std::endl;
 
-            QCoreApplication::exit();
-            return;
-        }
-        else {
-            std::cerr << QString("エラー : 不明なオプションです - %1").arg(arg).toStdString() << std::endl;
+        m_SysConfFile = option;
 
+        if (getConfiguration(m_SysConfFile)) {
             QCoreApplication::exit();
             return;
         }
     }
-
-    if (m_SysConfFile.isEmpty()) {
-        std::cerr << QString("エラー : 設定ファイルのパスが不明です").toStdString() << std::endl;
-
+    else {
+        std::cerr << QString("エラー : 不明なオプションです - %1").arg(parser.isSet(specifiedOption)).toStdString() << std::endl;
         QCoreApplication::exit();
         return;
     }
@@ -178,10 +241,11 @@ void Runner::fetch()
 
     m_pEarthQuake = std::make_unique<EarthQuake>(m_iGetInfo, m_EQAlertURL, m_EQInfoURL,
                                                  m_bEQAlert, m_bEQInfo, m_AlertScale, m_InfoScale, m_AlertFile, m_InfoFile,
-                                                 m_RequestURL, m_EQsubTime, m_EQchangeTitle, m_ThreadInfo, m_ExpiredXPath, this);
+                                                 m_RequestURL, m_EQsubTime, m_EQchangeTitle, m_ThreadInfo, m_ExpiredXPath,
+                                                 this);
 
     // 実行
-    [[maybe_unused]] auto ret = m_pEarthQuake->EQProcess();
+    [[maybe_unused]] auto ret = m_pEarthQuake->EQProcess(m_EQImageInfo);
 
 #ifdef _DEBUG
     // 処理終了時刻
@@ -357,6 +421,35 @@ int Runner::getConfiguration(QString &filepath)
             std::cout << QString("強制的に50 (震度5強) に設定されます").toStdString() << std::endl;
 
             m_InfoScale = 50;
+        }
+
+        // 震度画像を取得するための設定オブジェクト
+        QJsonObject imageObj = JsonObject.value("image").toObject();
+
+        /// 震度画像の取得機能の有効 / 無効
+        m_EQImageInfo.bEnable = imageObj.value("enable").toBool(false);
+
+        if (m_EQImageInfo.bEnable) {
+            /// Yahoo天気・災害の地震情報一覧のURL
+            m_EQImageInfo.Url = QUrl(imageObj.value("url").toString(""));
+
+            /// Yahoo天気・災害の地震情報の起点となるURL
+            m_EQImageInfo.BaseUrl = imageObj.value("baseurl").toString("");
+
+            /// 地震情報の震度画像を取得するための日時形式
+            m_EQImageInfo.DateFormat = imageObj.value("eqdateformat").toString("");
+
+            /// 該当する地震情報のURLを取得するためのXPath式 (テーブル)
+            m_EQImageInfo.ListXPath = imageObj.value("eqlistxpath").toString("");
+
+            /// 該当する地震情報のURLを取得するためのXPath式 (テーブル内の要素)
+            m_EQImageInfo.DetailXPath = imageObj.value("eqdetailxpath").toString("");
+
+            /// 該当する地震情報のURLを取得するためのXPath式 (テーブル内のaタグのhref要素)
+            m_EQImageInfo.UrlXPath = imageObj.value("equrlxpath").toString("");
+
+            /// 該当する地震情報の震度画像を取得するためのXPath式
+            m_EQImageInfo.ImgXPath = imageObj.value("imgxpath").toString("");
         }
 
         // メンバ変数m_EQIntervalの値を使用して自動的に地震情報を取得するかどうか

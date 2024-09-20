@@ -14,6 +14,7 @@
 #include <QTimer>
 #include <memory>
 #include "EarthQuake.h"
+#include "Image.h"
 
 
 class Runner : public QObject
@@ -22,6 +23,7 @@ class Runner : public QObject
 
 private:  // Variables
     // 共通
+    QCoreApplication                        &m_App;         // 本ソフトウェアのアプリケーションオブジェクト
     QStringList                             m_args;         // コマンドラインオプション
     QString                                 m_SysConfFile;  // このソフトウェアの設定ファイルのパス
     bool                                    m_bOneShot;     // ワンショット機能の有効 / 無効
@@ -49,6 +51,7 @@ private:  // Variables
                                                                 // 防弾嫌儲およびニュース速報(Libre)等のスレッドのタイトルが変更できる掲示板で使用可能
     QTimer                                  m_EQTimer;          // 地震の情報を取得するためのインターバル時間をトリガとするタイマ
     std::unique_ptr<EarthQuake>             m_pEarthQuake;      // 地震情報クラスを管理するオブジェクト
+    EQIMAGEINFO                             m_EQImageInfo;      // 震度画像を取得するための設定オブジェクト
     std::atomic<bool>                       m_stopRequested;    // [q]キーまたは[Q]キーを押下した場合のフラグ
 
 #ifdef Q_OS_LINUX
@@ -63,7 +66,7 @@ private:    // Methods
     int         getConfiguration(QString &filepath);        // このソフトウェアの設定ファイルの情報を取得
 
 public:  // Methods
-    explicit    Runner(QStringList args, QObject *parent = nullptr);
+    explicit    Runner(QCoreApplication &app, QStringList args, QObject *parent = nullptr);
     ~Runner() override = default;
 
 signals:
