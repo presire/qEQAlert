@@ -12,6 +12,7 @@ private:
     bool        m_HelpSet      = false;
     bool        m_VersionSet   = false;
     bool        m_SysConfSet   = false;
+    bool        m_TestFileSet  = false;
     QStringList m_unknownOptionNames;
 
 public:
@@ -22,6 +23,7 @@ public:
     bool        isHelpSet()             const;
     bool        isVersionSet()          const;
     bool        isSysConfSet()          const;
+    bool        isTestFileSet()         const;
 };
 
 #endif // COMMANDLINEPARSER_H

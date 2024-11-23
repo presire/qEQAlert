@@ -19,6 +19,9 @@ void CommandLineParser::process(const QStringList &arguments)
         else if (arg.startsWith("--sysconf=")) {
             m_SysConfSet  = true;
         }
+        else if (arg.startsWith("--test-file=")) {
+            m_TestFileSet  = true;
+        }
         else if (arg.startsWith("-")) {
             // 未知のオプションとして扱う
             m_unknownOptionNames.append(arg);
@@ -51,4 +54,10 @@ bool CommandLineParser::isVersionSet() const
 bool CommandLineParser::isSysConfSet() const
 {
     return m_SysConfSet;
+}
+
+
+bool CommandLineParser::isTestFileSet() const
+{
+    return m_TestFileSet;
 }

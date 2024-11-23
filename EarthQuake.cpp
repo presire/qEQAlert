@@ -1,80 +1,69 @@
 #include <QTimeZone>
-#include <QDomDocument>
 #include <iostream>
 #include <cmath>
 #include <utility>
 #include "EarthQuake.h"
 #include "HtmlFetcher.h"
+#include "LockFileGuard.h"
 
 
-[[maybe_unused]] EarthQuake::EarthQuake(QObject *parent) : QObject(parent)
-{
-}
-
-
-EarthQuake::EarthQuake(int iGetInfo, QString EQAlertURL, QString EQInfoURL,
-                       bool bEQAlert, bool bEQInfo, int AlertScale, int InfoScale, QString AlertFile, QString InfoFile,
-                       QString RequestURL, bool bSubjectTime, bool bEQChangeTitle, THREAD_INFO ThreadInfo, QString ExpiredXPath,
+EarthQuake::EarthQuake(COMMONDATA CommonData, THREAD_INFO ThreadInfo, EQIMAGEINFO &EQImageInfo,
+                       bool bEQAlert,         QString EQAlertURL,     QString AlertFile,
+                       bool bEQInfo,          QString EQInfoURL,      QString InfoFile,
                        QObject *parent) :
-    m_iGetInfo(iGetInfo),m_EQAlertURL(std::move(EQAlertURL)), m_EQInfoURL(std::move(EQInfoURL)),
-    m_bEQAlert(bEQAlert), m_bEQInfo(bEQInfo), m_AlertScale(AlertScale), m_InfoScale(InfoScale),
-    m_AlertFile(std::move(AlertFile)), m_InfoFile(std::move(InfoFile)), m_RequestURL(std::move(RequestURL)), m_bSubjectTime(bSubjectTime),
-    m_EQchangeTitle(bEQChangeTitle), m_ThreadInfo(std::move(ThreadInfo)), m_ExpiredXPath(std::move(ExpiredXPath)),
+    m_CommonData(CommonData), m_ThreadInfo(ThreadInfo),            m_EQImageInfo(EQImageInfo),
+    m_bEQAlert(bEQAlert),     m_EQAlertURL(std::move(EQAlertURL)), m_AlertFile(std::move(AlertFile)),
+    m_bEQInfo(bEQInfo),       m_EQInfoURL(std::move(EQInfoURL)),   m_InfoFile(std::move(InfoFile)),
     QObject{parent}
 {
-
 }
 
 
 EarthQuake::~EarthQuake() = default;
 
 
-int EarthQuake::EQProcess(EQIMAGEINFO &EQImageInfo)
+int EarthQuake::EQProcessAlert()
 {
     // 緊急地震速報(警報)の処理を実行
     // 現在は非同期(マルチスレッド)で実行しない
     if (m_bEQAlert) {
         if (m_pEQAlertWorker == nullptr) {
-            COMMONDATA data = {
-                1,              // JMAから緊急地震速報(警報)が取得できないため、P2P地震情報から取得する
-                m_AlertScale,
-                m_InfoScale,
-                m_EQAlertURL,
-                m_RequestURL,
-                m_AlertFile,
-                m_bSubjectTime,
-                false,
-                ""
-            };
+            COMMONDATA data   = m_CommonData;
+            data.EQInfoURL    = m_EQAlertURL;
+            data.LogFile      = m_AlertFile;
+            data.bChangeTitle = false;
 
             m_pEQAlertWorker = std::make_unique<Worker>(data, m_ThreadInfo);
+        }
+        else {
+            m_pEQAlertWorker->initialize();
         }
 
         m_pEQAlertWorker->ProcessEQAlert();
     }
 
+    return 0;
+}
+
+
+int EarthQuake::EQProcessInfo()
+{
     // 発生した地震情報の処理を実行
     // 現在は非同期(マルチスレッド)で実行しない
     if (m_bEQInfo) {
         if (m_pEQInfoWorker == nullptr) {
-            COMMONDATA data = {
-                m_iGetInfo,
-                m_AlertScale,
-                m_InfoScale,
-                m_EQInfoURL,
-                m_RequestURL,
-                m_InfoFile,
-                false,
-                m_EQchangeTitle,
-                m_ExpiredXPath,
-                "",
-                1000
-            };
+            COMMONDATA data   = m_CommonData;
+            data.EQInfoURL    = m_EQInfoURL;
+            data.LogFile      = m_InfoFile;
+            data.bSubjectTime = false;
 
             m_pEQInfoWorker = std::make_unique<Worker>(data, m_ThreadInfo);
         }
+        else {
+            m_pEQInfoWorker->initialize();
+        }
 
-        m_pEQInfoWorker->ProcessEQInfo(EQImageInfo);
+        m_pEQInfoWorker->ProcessEQInfo(m_EQImageInfo);
     }
 
     return 0;
@@ -83,14 +72,23 @@ int EarthQuake::EQProcess(EQIMAGEINFO &EQImageInfo)
 
 Worker::Worker(QObject *parent) : QObject(parent)
 {
-
 }
 
 
 Worker::Worker(COMMONDATA commondata, THREAD_INFO threadInfo, QObject *parent)
     : m_CommonData(std::move(commondata)), m_ThreadInfo(std::move(threadInfo)), QObject(parent)
 {
+}
 
+
+// 各メンバ変数を初期化する
+void Worker::initialize()
+{
+    m_ReplyData.clear();
+    m_Alert.reset();
+    m_AlertLog  = ALERTLOG();
+    m_Info.reset();
+    m_InfoLog   = INFOLOG();
 }
 
 
@@ -98,9 +96,9 @@ Worker::Worker(COMMONDATA commondata, THREAD_INFO threadInfo, QObject *parent)
 int Worker::ProcessEQAlert()
 {
     if (m_CommonData.iGetInfo == 0) {
-        // JMAから緊急地震速報(警報)が取得できないため、強制的にP2P地震情報から取得する
-        if (onEQDownloaded_for_P2P()) {
-            // P2P地震情報のデータの取得に失敗した場合
+        // JMAから緊急地震速報(警報)のデータを取得
+        if (onEQDownloaded_for_JMA(true)) {
+            // JMAから地震情報のデータの取得に失敗した場合
             return -1;
         }
     }
@@ -113,9 +111,18 @@ int Worker::ProcessEQAlert()
     }
 
     // 取得したデータを整形
-    if (FormattingData_for_P2P()) {
-        // 古い地震情報、以前スレッドを立てた地震情報、データの整形に失敗した場合
-        return -1;
+    if (m_CommonData.iGetInfo == 0) {
+        // JMA (気象庁) からデータを取得
+        if (FormattingData_for_JMA(true)) {
+            // JMA (気象庁) のデータの取得に失敗した場合
+            return -1;
+        }
+    }
+    else if (m_CommonData.iGetInfo == 1) {
+        if (FormattingData_for_P2P()) {
+            // 古い地震情報、以前スレッドを立てた地震情報、データの整形に失敗した場合
+            return -1;
+        }
     }
 
     // 整形したデータをスレッド情報へ変換
@@ -132,7 +139,7 @@ int Worker::ProcessEQAlert()
     }
 
     // 地震IDを地震情報のログファイルに保存
-    if (!m_Alert.m_ID.isEmpty()) m_Alert.AddInfo(m_CommonData.LogFile);
+    if (!m_Alert.m_ID.isEmpty()) m_Alert.AddLog(m_CommonData.LogFile, m_AlertLog);
 
     return 0;
 }
@@ -144,7 +151,7 @@ int Worker::ProcessEQInfo(EQIMAGEINFO &EQImageInfo)
 {
     if (m_CommonData.iGetInfo == 0) {
         // JMA (気象庁) からデータを取得
-        if (onEQDownloaded_for_JMA()) {
+        if (onEQDownloaded_for_JMA(false)) {
             // JMA (気象庁) のデータの取得に失敗した場合
             return -1;
         }
@@ -159,7 +166,7 @@ int Worker::ProcessEQInfo(EQIMAGEINFO &EQImageInfo)
 
     if (m_CommonData.iGetInfo == 0) {
         // JMA (気象庁) からデータを取得
-        if (FormattingData_for_JMA()) {
+        if (FormattingData_for_JMA(false)) {
             // JMA (気象庁) のデータの取得に失敗した場合
             return -1;
         }
@@ -299,8 +306,38 @@ int Worker::ProcessEQInfo(EQIMAGEINFO &EQImageInfo)
 
 
 // JMA(気象庁)から発生した地震情報のURLを取得する
-int Worker::onEQDownloaded_for_JMA()
+int Worker::onEQDownloaded_for_JMA(bool bAlert)
 {
+    // テストファイルを使用するかどうかの確認
+    if (!m_CommonData.TestFile.isEmpty()) {
+        // テストファイルを使用する場合
+        try {
+            // ログファイルに同じ緊急地震速報 (警報) のURLが存在する場合は無視する
+            if (!SearchAlertEQID(m_CommonData.TestFile))       return -1;
+
+            // テストファイルを開く
+            QFile TestFile(m_CommonData.TestFile);
+            if (!TestFile.open(QIODevice::ReadOnly)) {
+                throw std::runtime_error(TestFile.errorString().toStdString());
+            }
+
+            // テストファイルの読み込み
+            m_ReplyData = TestFile.readAll();
+
+            // テストファイルを閉じる
+            TestFile.close();
+
+            // 取得した緊急地震速報(警報)のURLにテストファイルのパスを指定
+            m_Alert.m_URL = m_CommonData.TestFile;
+
+            return 0;
+        }
+        catch (const std::exception &e) {
+            std::cerr << QString("エラー: テスト用XMLファイルの読み込み中にエラーが発生しました: %1").arg(e.what()).toStdString() << std::endl;
+            return -1;
+        }
+    }
+
     // レスポンス待機の設定
     QEventLoop loop;
     m_pEQManager = std::make_unique<QNetworkAccessManager>();
@@ -350,21 +387,50 @@ int Worker::onEQDownloaded_for_JMA()
                         idValue = idElement.text();
 
                         // <id>タグの値に"VXSE"という文字列が含まれているかどうかを確認する
-                        // "VXSE51"(震度速報) あるいは "VXSE53"(震源・震度に関する情報) という文字列が含まれている場合は、それが発生した地震情報のURLである
-                        // なお、"VXSE52"(震源速報) はフォーマットが異なる部分も多いため、取得しない
-                        if (idValue.contains("VXSE51", Qt::CaseSensitive) || idValue.contains("VXSE53", Qt::CaseSensitive)) {
-                            // JMAから地震情報(XML)を取得する
-                            pReply->deleteLater();
+                        if (bAlert) {
+                            // "VXSE43"という文字列が含まれている場合は、それが緊急地震速報 (警報) のURLである
+                            // "VXSE44" : 緊急地震速報 (予報)
+                            // "VXSE45" : 緊急地震速報 (地震動予報)
+                            // "VXSE47" : リアルタイム震度電文
+                            // 仕様 : https://www.data.jma.go.jp/eew/data/nc/katsuyou/reference.pdf
+                            // 仕様 : https://xml.kishou.go.jp/tec_material.html
+                            if (idValue.contains("VXSE43", Qt::CaseSensitive)) {
+                                // JMAから緊急地震速報 (警報) の地震情報(XML)の取得
+                                pReply->deleteLater();
 
-                            if (DownloadContents(QUrl(idValue))) return -1;
+                                // ログファイルに同じ緊急地震速報 (警報) のURLが存在する場合は無視する
+                                if (!SearchAlertEQID(idValue))       return -1;
 
-                            return 0;
+                                // 緊急地震速報 (警報) のURLから地震情報を取得する
+                                if (DownloadContents(QUrl(idValue))) return -1;
+
+                                // 取得した緊急地震速報(警報)のURLを保存
+                                m_Alert.m_URL = idValue;
+
+                                return 0;
+                            }
+                        }
+                        else {
+                            // "VXSE51"(震度速報) あるいは "VXSE53"(震源・震度に関する情報) という文字列が含まれている場合は、それが発生した地震情報のURLである
+                            // なお、"VXSE52"(震源速報) はフォーマットが異なる部分も多いため、取得しない
+                            if (idValue.contains("VXSE51", Qt::CaseSensitive) || idValue.contains("VXSE53", Qt::CaseSensitive)) {
+                                // JMAから発生した地震情報(XML)の取得
+                                pReply->deleteLater();
+
+                                // 震度速報あるいは震源・震度に関する情報のURLから発生した地震情報の取得
+                                if (DownloadContents(QUrl(idValue))) return -1;
+
+                                return 0;
+                            }
                         }
                     }
                 }
 
-                // 発生した地震情報のURLが記載されていない場合
-                std::cout << QString("発生した地震情報のURLがありません").toStdString() << std::endl;
+                // 地震情報のURLが記載されていない場合
+                std::cout << QString("地震情報のURLがありません").toStdString() << std::endl;
+                pReply->deleteLater();
+
+                return -1;
             }
             else {
                 // <entry>タグが存在しない場合
@@ -447,6 +513,33 @@ int Worker::DownloadContents(const QUrl &url)
 // P2P地震情報から緊急地震速報(警報)および発生した地震情報のデータを取得する
 int Worker::onEQDownloaded_for_P2P()
 {
+    // テストファイルを使用するかどうかの確認
+    if (!m_CommonData.TestFile.isEmpty()) {
+        // テストファイルを使用する場合
+        try {
+            // テストファイルを開く
+            QFile TestFile(m_CommonData.TestFile);
+            if (!TestFile.open(QIODevice::ReadOnly)) {
+                throw std::runtime_error(TestFile.errorString().toStdString());
+            }
+
+            // テストファイルの読み込み
+            m_ReplyData = TestFile.readAll();
+
+            // テストファイルを閉じる
+            TestFile.close();
+
+            // 取得した地震情報のURLにテストファイルのパスを指定
+            m_Alert.m_URL = m_CommonData.TestFile;
+
+            return 0;
+        }
+        catch (const std::exception &e) {
+            std::cerr << QString("エラー: テスト用JSONファイルの読み込み中にエラーが発生しました: %1").arg(e.what()).toStdString() << std::endl;
+            return -1;
+        }
+    }
+
     // レスポンス待機の設定
     QEventLoop loop;
     m_pEQManager = std::make_unique<QNetworkAccessManager>();
@@ -488,35 +581,35 @@ int Worker::onEQDownloaded_for_P2P()
 }
 
 
-// P2P地震情報から取得した地震情報を整形する
-int Worker::FormattingData_for_JMA()
+// JMAから取得した地震情報を整形する
+int Worker::FormattingData_for_JMA(bool bAlert)
 {
-    // 発生した地震情報のオブジェクトをクリア
-    m_Info = EarthQuakeInfo();
+    if (bAlert) {
+        // 緊急地震速報(警報)の場合
+        QDomDocument doc;
+        QString      errorMsg;
+        int          errorLine,
+                     errorColumn;
 
-    QDomDocument doc;
-    if (doc.setContent(m_ReplyData)) {
-        // Headタグ
+        // ダウンロードしたXMLの解析
+        if (!doc.setContent(m_ReplyData, &errorMsg, &errorLine, &errorColumn)) {
+            std::cerr << QString("エラー: XMLの解析に失敗しました: %1 (行: %2, 列: %3) (JMA 緊急地震速報(警報))")
+                             .arg(errorMsg).arg(errorLine).arg(errorColumn).toStdString() << std::endl;
+            return -1;
+        }
+
+        // ルート (Report要素) の取得
         QDomElement root = doc.documentElement();
-        QDomElement headElement = root.firstChildElement("Head");
+        if (root.tagName() != "Report") {
+            std::cerr << QString("エラー: 予期しないルート要素です: %1 (JMA 緊急地震速報(警報))").arg(root.tagName()).toStdString() << std::endl;
+            return -1;
+        }
 
-        QString targetDateTime = "";
-        if (!headElement.isNull()) {
-            /// ログファイルに同じ地震IDが存在するかどうかを確認する
-            QString eventID = headElement.firstChildElement("EventID").text();
-            m_Info.m_ID = eventID;
-
-            /// ログファイルにある同じ地震IDの"ReportDateTime"キー (報告時刻) の日時が同じ場合は無視する
-            auto reportDateTime = headElement.firstChildElement("ReportDateTime").text();
-            if (!SearchInfoEQID(eventID, reportDateTime)) {
-                /// "ReportDateTime"キーの日時が同じ場合
-                std::cout << QString("発生した地震情報は記録済みのため無視します").toStdString() << std::endl;
-                return -1;
-            }
-
-            /// 現在時刻と比較して、発生した地震情報の最新情報が10[分]以内かどうかを確認
-            /// 10[分]以内の地震情報の場合は取得
-            /// まず、発生した地震情報の報告時刻を変換
+        // 現在時刻と比較して、緊急地震速報(警報)の報告時刻が30[秒]以内かどうかを確認
+        // 報告時刻が30[秒]以内の緊急地震速報(警報)の場合は取得
+        QString reportDateTime;
+        if (GetElementText(root.firstChildElement("Head"), "ReportDateTime", reportDateTime)) {
+            /// まず、緊急地震速報(警報)の報告時刻を変換
             QDateTime issueTime     = QDateTime::fromString(reportDateTime, Qt::ISODate);
             issueTime.setTimeZone(QTimeZone("Asia/Tokyo"));
 
@@ -524,247 +617,455 @@ int Worker::FormattingData_for_JMA()
             auto currentTime        = QDateTime::currentDateTime();
             currentTime.setTimeZone(QTimeZone("Asia/Tokyo"));
 
-            /// 現在時刻と比較して、発生した地震情報の最新情報 (報告時刻) が10[分]以内かどうかを確認
-            /// 10[分]以内の地震情報の場合は取得
+            /// 30[秒]以内の緊急地震速報(警報)の場合は取得
             qint64 diff = static_cast<int>(issueTime.msecsTo(currentTime) / 1000);
-            if (!(diff >= 0 && diff <= 600)) {
-                /// 発生した地震情報において、600[秒](10[分])を超過している場合は無視する
-                std::cout << QString("発生した地震情報は10[分]を超過しているため無視します").toStdString() << std::endl;
+            if (!(diff >= 0 && diff <= 30)) {
+                /// 緊急地震速報(警報)において、報告時刻から30[秒]を超過している場合は無視する
+                std::cout << QString("緊急地震速報 (警報) は30[秒]を超過しているため無視します").toStdString() << std::endl;
                 return -1;
             }
 
-            /// 地震情報のヘッドラインを取得
-            /// 本文の先頭に記載 : "【タイトル】ヘッドラインの文章"形式
-            QDomElement headLineElement = headElement.firstChildElement("Headline");
-            if (!headLineElement.isNull()) {
-                auto headLineKind = headElement.firstChildElement("Title").text();
-                auto headLineText = headLineElement.firstChildElement("Text").text();
-
-                /// 先頭の全角スペースと半角スペースを除去
-                static QRegularExpression RegEx("^[　 ]+");
-                headLineText.remove(RegEx);
-
-                if (!headLineKind.isEmpty()) {
-                    m_Info.m_Headline  = QString("【%1】").arg(headLineKind) + QString("\n");
-                }
-
-                if (!headLineText.isEmpty()) {
-                    m_Info.m_Headline +=  headLineText;
-                }
-            }
-
-            /// JMAの地震情報の報告日時を取得
-            m_Info.m_ReportDateTime = reportDateTime;
-
-            /// TargetDateTimeタグの値を取得する
-            /// Bodyタグ - Earthquakeタグ - OriginTimeタグが存在しない場合は、
-            /// Headタグ - TargetDateTimeタグの値を使用する
-            targetDateTime = headElement.firstChildElement("TargetDateTime").text();
+            // 緊急地震速報(警報)の報告時刻を取得
+            m_Alert.m_ReportDateTime = reportDateTime;
         }
         else {
+            std::cerr << QString("エラー: 報告時刻 (ReportDateTime要素) が存在しません (JMA 緊急地震速報(警報))").toStdString() << std::endl;
             return -1;
         }
 
-        m_Info.m_Latitude  = "-200";
-        m_Info.m_Longitude = "-200";
-        m_Info.m_Depth     = "-1";
-        m_Info.m_Magnitude = "-1";
+        // 地震IDの取得
+        QString ID;
+        if (GetElementText(root.firstChildElement("Head"), "EventID", ID)) {
+            m_Alert.m_ID = ID;
+        }
+        else {
+            std::cerr << QString("エラー: 地震ID (EventID要素) が存在しません (JMA 緊急地震速報(警報))").toStdString() << std::endl;
+            return -1;
+        }
 
-        // Bodyタグ
+        QString headline;  // 緊急地震速報(警報)のヘッドライン
+
+        // ヘッドラインの取得
+        if (GetElementText(root.firstChildElement("Head").firstChildElement("Headline"), "Text", headline)) {
+            m_Alert.m_Headline = headline;
+        }
+
+        // 緊急地震速報(警報)の基本情報の取得
         QDomElement bodyElement = root.firstChildElement("Body");
-        if (!bodyElement.isNull()) {
-            // Earthquakeタグ
-            QDomElement earthquakeElement = bodyElement.firstChildElement("Earthquake");
-            if (!earthquakeElement.isNull()) {
-                // OriginTimeタグの値を取得する
-                QString originTime = earthquakeElement.firstChildElement("OriginTime").text();
-                if (originTime.isEmpty()) originTime = targetDateTime;
+        if (bodyElement.isNull()) {
+            std::cerr << QString("エラー: 緊急地震速報(警報)の基本情報 (Body要素) が見つかりません (JMA 緊急地震速報(警報))").toStdString() << std::endl;
+            return -1;
+        }
 
-                /// 現在時刻と比較して、発生した地震情報の最新情報が10[分]以内かどうかを確認
-                /// 10[分]以内の地震情報の場合は取得
-                /// (現在はbodyタグの情報は使用しない)
-                // QDateTime issueTime = QDateTime::fromString(originTime, Qt::ISODate);
-                // issueTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+        // 緊急地震速報(警報)の地震に関する基本情報の取得
+        QString originalTime,   // 地震発生時刻
+                arrivalTime,    // 地震発現(到着)時刻
+                epicenter,      // 震源地
+                coordinate,     // 緯度・経度・震源の深さ
+                magnitude;      // マグニチュード
 
-                // auto currentTime        = QDateTime::currentDateTime();
-                // currentTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+        QDomElement earthquakeElement = bodyElement.firstChildElement("Earthquake");
+        if (!earthquakeElement.isNull()) {
+            // 地震発生時刻の取得
+            if (GetElementText(earthquakeElement, "OriginTime", originalTime)) {
+                QDateTime dateTime    = QDateTime::fromString(originalTime, Qt::ISODateWithMs);
+                dateTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+                m_Alert.m_OriginTime  = dateTime.toString("yyyy年M月d日 h時m分s秒");
+            }
 
-                // qint64 diff = static_cast<int>(issueTime.msecsTo(currentTime) / 1000);
-                // if (!(diff >= 0 && diff <= 600)) {
-                //     /// 発生した地震情報において、600[秒](10[分])を超過している場合は無視する
-                //     return -1;
-                // }
+            // 地震発現(到達)時刻の取得
+            if (GetElementText(earthquakeElement, "ArrivalTime", arrivalTime)) {
+                QDateTime dateTime    = QDateTime::fromString(arrivalTime, Qt::ISODateWithMs);
+                dateTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+                m_Alert.m_ArrivalTime = dateTime.toString("yyyy年M月d日 h時m分s秒");
+            }
 
-                m_Info.m_Time = ConvertDateTimeFormat(originTime);
+            // 予想される震源の情報の取得
+            m_Alert.m_Name      = "";
+            m_Alert.m_Latitude  = "-200";
+            m_Alert.m_Longitude = "-200";
+            m_Alert.m_Depth     = "-1";
+            m_Alert.m_Magnitude = "-1";
 
-                // 震源地、震源の深さ、緯度、経度を取得する
-                // Hypocenterタグ
-                QDomElement hypocenterElement = earthquakeElement.firstChildElement("Hypocenter");
-                if (!hypocenterElement.isNull()) {
-                    // Areaタグ
-                    QDomElement areaElement = hypocenterElement.firstChildElement("Area");
-                    if (!areaElement.isNull()) {
-                        // Nameタグ (震源地) の値を取得する
-                        // なお、発生直後の地震情報には、震源地が記載されていない場合が多い
-                        if (!areaElement.firstChildElement("Name").isNull()) {
-                            m_Info.m_Name = areaElement.firstChildElement("Name").text();
-                        }
+            QDomElement hypocenterElement = earthquakeElement.firstChildElement("Hypocenter");
+            if (!hypocenterElement.isNull()) {
+                QDomElement areaElement = hypocenterElement.firstChildElement("Area");
+                if (!areaElement.isNull()) {
+                    // 予想される震源地の取得
+                    if (GetElementText(areaElement, "Name", epicenter)) {
+                        m_Alert.m_Name = epicenter;
+                    }
 
-                        // jmx_eb:Coordinateタグ (緯度・経度および震源の深さ) の値を取得する
-                        // なお、発生直後の地震情報には、緯度・経度および震源の深さが記載されていない場合が多い
-                        if (!areaElement.firstChildElement("jmx_eb:Coordinate").isNull()) {
-                            QString coordinate = areaElement.firstChildElement("jmx_eb:Coordinate").text();
+                    // 予想される震源の緯度・経度・震源の深さの取得
+                    if (GetElementText(areaElement, "jmx_eb:Coordinate", coordinate)) {
+                        /// 文字列から '/' を削除
+                        coordinate.remove('/');
 
-                            /// 文字列から '/' を削除
-                            coordinate.remove('/');
+                        /// '+' と '-' で文字列を分割
+                        static QRegularExpression RegEx("[+-]");
+                        QStringList parts = coordinate.split(RegEx, Qt::SkipEmptyParts);
 
-                            /// '+' と '-' で文字列を分割
-                            static QRegularExpression RegEx("[+-]");
-                            QStringList parts = coordinate.split(RegEx, Qt::SkipEmptyParts);
-
-                            if (parts.size() == 3) {
-                                m_Info.m_Latitude  = QString::number(parts[0].toDouble(), 'f', 1);
-                                m_Info.m_Longitude = QString::number(parts[1].toDouble(), 'f', 1);
-                                m_Info.m_Depth     = QString::number(static_cast<int>(parts[2].toDouble()) / 1000, 10);
-                            }
+                        if (parts.size() == 3) {
+                            m_Alert.m_Latitude  = QString::number(parts[0].toDouble(), 'f', 1);
+                            m_Alert.m_Longitude = QString::number(parts[1].toDouble(), 'f', 1);
+                            m_Alert.m_Depth     = QString::number(static_cast<int>(parts[2].toDouble()) / 1000, 10);
                         }
                     }
-                }
-
-                // jmx_eb:Magnitudeタグ (マグニチュード) の値を取得する
-                if (!earthquakeElement.firstChildElement("jmx_eb:Magnitude").isNull()) {
-                    m_Info.m_Magnitude = earthquakeElement.firstChildElement("jmx_eb:Magnitude").text();
                 }
             }
 
-            // Intensityタグ
-            QDomElement intensityElement = bodyElement.firstChildElement("Intensity");
-            if (!intensityElement.isNull()) {
-                QDomElement observationElement = intensityElement.firstChildElement("Observation");
-                if (!observationElement.isNull()) {
-                    QString maxInt  = observationElement.firstChildElement("MaxInt").text();
-                    auto MaxScale   = ConvertJMAScale<int>(maxInt);
+            // 予想されるマグニチュードの取得
+            if (GetElementText(earthquakeElement, "jmx_eb:Magnitude", magnitude)) {
+                m_Alert.m_Magnitude = magnitude;
+            }
+        }
+        else {
+            std::cerr << QString("エラー: 緊急地震速報(警報)の基本情報 (Earthquake要素) が見つかりません (JMA 緊急地震速報(警報))").toStdString() << std::endl;
+            return -1;
+        }
 
-                    /// ユーザが設定した震度の閾値を確認
-                    /// 1つでも閾値以上の地震が各地域で発生した場合は、発生した地震情報を取得
-                    if (MaxScale < m_CommonData.InfoScale) {
-                        std::cout << QString("発生した地震情報は、設定した震度より小さいため無視します").toStdString() << std::endl;
-                        return -1;
+        // 予想される各地域の震度の取得
+        QDomElement intensityElement = bodyElement.firstChildElement("Intensity");
+        if (!intensityElement.isNull()) {
+            QDomElement forecastElement = intensityElement.firstChildElement("Forecast");
+            if (!forecastElement.isNull()) {
+                /// 予想される各地域 (Pref要素) のリストの取得 (最大8個に制限)
+                QDomNodeList prefList = forecastElement.elementsByTagName("Pref");
+                int count = qMin(prefList.size(), 8);
+
+                /// 予想される場所とその震度の取得
+                QString kind,
+                        areaName,
+                        fromScale,
+                        toScale,
+                        time;
+
+                for (int i = 0; i < count; i++) {
+                    QDomElement prefelement     = prefList.at(i).toElement();
+                    QDomElement areaElement     = prefelement.firstChildElement("Area");
+                    QDomElement forecastInt     = areaElement.firstChildElement("ForecastInt");
+                    QDomElement categolyElement = areaElement.firstChildElement("Category");
+
+                    if (GetElementText(areaElement, "Name", areaName)                                   &&
+                        GetElementText(areaElement.firstChildElement("ForecastInt"), "From", fromScale) &&
+                        GetElementText(areaElement.firstChildElement("ForecastInt"), "To", toScale)) {
+                        AREA area = {};
+                        area.KindCode    = GetElementText(categolyElement.firstChildElement("Kind"), "Code", kind) ? kind : "";
+                        area.Name        = areaName;
+                        area.ScaleFrom   = ConvertJMAScale<int>(fromScale);
+                        area.ScaleTo     = ConvertJMAScale<int>(toScale);
+                        area.ArrivalTime = GetElementText(areaElement, "ArrivalTime", time) ? ConvertDateTimeFormat(time) : "";
+                        m_Alert.m_Areas.append(area);
+                    }
+                }
+
+                /// 緊急地震速報(警報)の地域に対して、最大震度の大きさで降順にソート
+                if (m_Alert.m_Areas.count() > 1) {
+                    std::sort(m_Alert.m_Areas.begin(), m_Alert.m_Areas.end(), sortAreas);
+                }
+            }
+        }
+
+        // 固定付加分の取得
+        QDomElement commentsElement = bodyElement.firstChildElement("Comments");
+        QDomElement warningComment  = commentsElement.firstChildElement("WarningComment");
+        if (!warningComment.isNull() && warningComment.attribute("codeType") == "固定付加文") {
+            QString warningText;
+            if (GetElementText(warningComment, "Text", warningText)) {
+                m_Alert.m_Text = warningText;
+            }
+        }
+
+        /// 地震の情報を表すコード
+        m_Alert.m_Code = 556;
+    }
+    else {
+        // 発生した地震情報の場合
+
+        QDomDocument doc;
+        if (doc.setContent(m_ReplyData)) {
+            // Headタグ
+            QDomElement root = doc.documentElement();
+            QDomElement headElement = root.firstChildElement("Head");
+
+            QString targetDateTime = "";
+            if (!headElement.isNull()) {
+                /// ログファイルに同じ地震IDが存在するかどうかを確認する
+                QString eventID = headElement.firstChildElement("EventID").text();
+                m_Info.m_ID = eventID;
+
+                /// ログファイルにある同じ地震IDの"ReportDateTime"キー (報告時刻) の日時が同じ場合は無視する
+                auto reportDateTime = headElement.firstChildElement("ReportDateTime").text();
+                if (!SearchInfoEQID(eventID, reportDateTime)) {
+                    /// "ReportDateTime"キーの日時が同じ場合
+                    return -1;
+                }
+
+                /// 現在時刻と比較して、発生した地震情報の最新情報が10[分]以内かどうかを確認
+                /// 10[分]以内の地震情報の場合は取得
+                /// まず、発生した地震情報の報告時刻を変換
+                QDateTime issueTime     = QDateTime::fromString(reportDateTime, Qt::ISODate);
+                issueTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+
+                /// 次に、現在時刻を取得
+                auto currentTime        = QDateTime::currentDateTime();
+                currentTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+
+                /// 現在時刻と比較して、発生した地震情報の最新情報 (報告時刻) が10[分]以内かどうかを確認
+                /// 10[分]以内の地震情報の場合は取得
+                qint64 diff = static_cast<int>(issueTime.msecsTo(currentTime) / 1000);
+                if (!(diff >= 0 && diff <= 600)) {
+                    /// 発生した地震情報において、600[秒](10[分])を超過している場合は無視する
+                    std::cout << QString("発生した地震情報は10[分]を超過しているため無視します").toStdString() << std::endl;
+                    return -1;
+                }
+
+                /// 地震情報のヘッドラインを取得
+                /// 本文の先頭に記載 : "【タイトル】ヘッドラインの文章"形式
+                QDomElement headLineElement = headElement.firstChildElement("Headline");
+                if (!headLineElement.isNull()) {
+                    auto headLineKind = headElement.firstChildElement("Title").text();
+                    auto headLineText = headLineElement.firstChildElement("Text").text();
+
+                    /// 先頭の全角スペースと半角スペースを除去
+                    static QRegularExpression RegEx("^[　 ]+");
+                    headLineText.remove(RegEx);
+
+                    if (!headLineKind.isEmpty()) {
+                        m_Info.m_Headline  = QString("【%1】").arg(headLineKind) + QString("\n");
                     }
 
-                    m_Info.m_MaxScale = ConvertScale(MaxScale);
+                    if (!headLineText.isEmpty()) {
+                        m_Info.m_Headline +=  headLineText;
+                    }
+                }
 
-                    QDomNodeList prefList = observationElement.elementsByTagName("Pref");
-                    for (auto i = 0; i < prefList.size(); i++) {
-                        QDomElement prefElement = prefList.at(i).toElement();
-                        QString prefName = prefElement.firstChildElement("Name").text();
+                /// JMAの地震情報の報告日時を取得
+                m_Info.m_ReportDateTime = reportDateTime;
 
-                        QDomNodeList areaList = prefElement.elementsByTagName("Area");
-                        for (auto j = 0; j < areaList.size(); j++) {
-                            QDomElement areaElement = areaList.at(j).toElement();
+                /// TargetDateTimeタグの値を取得する
+                /// Bodyタグ - Earthquakeタグ - OriginTimeタグが存在しない場合は、
+                /// Headタグ - TargetDateTimeタグの値を使用する
+                targetDateTime = headElement.firstChildElement("TargetDateTime").text();
+            }
+            else {
+                return -1;
+            }
 
-                            // Cityタグの情報、または、Areaタグの情報を取得する
-                            QDomNodeList cityList = areaElement.elementsByTagName("City");
-                            if (cityList.size() > 0) {
-                                // Cityタグが存在する場合
-                                for (auto k = 0; k < cityList.size(); k++) {
-                                    QDomElement cityElement = cityList.at(k).toElement();
+            m_Info.m_Latitude  = "-200";
+            m_Info.m_Longitude = "-200";
+            m_Info.m_Depth     = "-1";
+            m_Info.m_Magnitude = "-1";
 
-                                    // 市区町村名を取得する
-                                    QString cityName        = cityElement.firstChildElement("Name").text();
+            // Bodyタグ
+            QDomElement bodyElement = root.firstChildElement("Body");
+            if (!bodyElement.isNull()) {
+                // Earthquakeタグ
+                QDomElement earthquakeElement = bodyElement.firstChildElement("Earthquake");
+                if (!earthquakeElement.isNull()) {
+                    // OriginTimeタグの値を取得する
+                    QString originTime = earthquakeElement.firstChildElement("OriginTime").text();
+                    if (originTime.isEmpty()) originTime = targetDateTime;
 
-                                    // Cityタグ内の震度を取得する
-                                    int cityMaxInt   = ConvertJMAScale<int>(areaElement.firstChildElement("MaxInt").text());
+                    /// 現在時刻と比較して、発生した地震情報の最新情報が10[分]以内かどうかを確認
+                    /// 10[分]以内の地震情報の場合は取得
+                    /// (現在はbodyタグの情報は使用しない)
+                    // QDateTime issueTime = QDateTime::fromString(originTime, Qt::ISODate);
+                    // issueTime.setTimeZone(QTimeZone("Asia/Tokyo"));
 
-                                    POINT point = {.Addr   = cityName,
+                    // auto currentTime        = QDateTime::currentDateTime();
+                    // currentTime.setTimeZone(QTimeZone("Asia/Tokyo"));
+
+                    // qint64 diff = static_cast<int>(issueTime.msecsTo(currentTime) / 1000);
+                    // if (!(diff >= 0 && diff <= 600)) {
+                    //     /// 発生した地震情報において、600[秒](10[分])を超過している場合は無視する
+                    //     return -1;
+                    // }
+
+                    m_Info.m_Time = ConvertDateTimeFormat(originTime);
+
+                    // 震源地、震源の深さ、緯度、経度を取得する
+                    // Hypocenterタグ
+                    QDomElement hypocenterElement = earthquakeElement.firstChildElement("Hypocenter");
+                    if (!hypocenterElement.isNull()) {
+                        // Areaタグ
+                        QDomElement areaElement = hypocenterElement.firstChildElement("Area");
+                        if (!areaElement.isNull()) {
+                            // Nameタグ (震源地) の値を取得する
+                            // なお、発生直後の地震情報には、震源地が記載されていない場合が多い
+                            if (!areaElement.firstChildElement("Name").isNull()) {
+                                m_Info.m_Name = areaElement.firstChildElement("Name").text();
+                            }
+
+                            // jmx_eb:Coordinateタグ (緯度・経度および震源の深さ) の値を取得する
+                            // なお、発生直後の地震情報には、緯度・経度および震源の深さが記載されていない場合が多い
+                            if (!areaElement.firstChildElement("jmx_eb:Coordinate").isNull()) {
+                                QString coordinate = areaElement.firstChildElement("jmx_eb:Coordinate").text();
+
+                                /// 文字列から '/' を削除
+                                coordinate.remove('/');
+
+                                /// '+' と '-' で文字列を分割
+                                static QRegularExpression RegEx("[+-]");
+                                QStringList parts = coordinate.split(RegEx, Qt::SkipEmptyParts);
+
+                                if (parts.size() == 3) {
+                                    m_Info.m_Latitude  = QString::number(parts[0].toDouble(), 'f', 1);
+                                    m_Info.m_Longitude = QString::number(parts[1].toDouble(), 'f', 1);
+                                    m_Info.m_Depth     = QString::number(static_cast<int>(parts[2].toDouble()) / 1000, 10);
+                                }
+                            }
+                        }
+                    }
+
+                    // jmx_eb:Magnitudeタグ (マグニチュード) の値を取得する
+                    if (!earthquakeElement.firstChildElement("jmx_eb:Magnitude").isNull()) {
+                        m_Info.m_Magnitude = earthquakeElement.firstChildElement("jmx_eb:Magnitude").text();
+                    }
+                }
+
+                // Intensityタグ
+                QDomElement intensityElement = bodyElement.firstChildElement("Intensity");
+                if (!intensityElement.isNull()) {
+                    QDomElement observationElement = intensityElement.firstChildElement("Observation");
+                    if (!observationElement.isNull()) {
+                        QString maxInt  = observationElement.firstChildElement("MaxInt").text();
+                        auto MaxScale   = ConvertJMAScale<int>(maxInt);
+
+                        /// ユーザが設定した震度の閾値を確認
+                        /// 1つでも閾値以上の地震が各地域で発生した場合は、発生した地震情報を取得
+                        if (MaxScale < m_CommonData.InfoScale) {
+                            std::cout << QString("発生した地震情報は、設定した震度より小さいため無視します").toStdString() << std::endl;
+                            return -1;
+                        }
+
+                        m_Info.m_MaxScale = ConvertScale(MaxScale);
+
+                        QDomNodeList prefList = observationElement.elementsByTagName("Pref");
+                        for (auto i = 0; i < prefList.size(); i++) {
+                            QDomElement prefElement = prefList.at(i).toElement();
+                            QString prefName = prefElement.firstChildElement("Name").text();
+
+                            QDomNodeList areaList = prefElement.elementsByTagName("Area");
+                            for (auto j = 0; j < areaList.size(); j++) {
+                                QDomElement areaElement = areaList.at(j).toElement();
+
+                                // Cityタグの情報、または、Areaタグの情報を取得する
+                                QDomNodeList cityList = areaElement.elementsByTagName("City");
+                                if (cityList.size() > 0) {
+                                    // Cityタグが存在する場合
+                                    for (auto k = 0; k < cityList.size(); k++) {
+                                        QDomElement cityElement = cityList.at(k).toElement();
+
+                                        // 市区町村名を取得する
+                                        QString cityName        = cityElement.firstChildElement("Name").text();
+
+                                        // Cityタグ内の震度を取得する
+                                        int cityMaxInt   = ConvertJMAScale<int>(areaElement.firstChildElement("MaxInt").text());
+
+                                        POINT point = {.Addr   = cityName,
+                                            .Pref   = prefName,
+                                            .Scale  = cityMaxInt,
+                                            .IsArea = false
+                                        };
+                                        m_Info.m_Points.append(point);
+                                    }
+                                }
+                                else {
+                                    // Cityタグが存在しない場合
+                                    // エリア名を取得する
+                                    QString areaName        = areaElement.firstChildElement("Name").text();
+
+                                    // Areaタグ内の震度を取得する
+                                    int areaMaxInt   = ConvertJMAScale<int>(areaElement.firstChildElement("MaxInt").text());
+
+                                    POINT point = {.Addr   = areaName,
                                         .Pref   = prefName,
-                                        .Scale  = cityMaxInt,
+                                        .Scale  = areaMaxInt,
                                         .IsArea = false
                                     };
                                     m_Info.m_Points.append(point);
                                 }
                             }
-                            else {
-                                // Cityタグが存在しない場合
-                                // エリア名を取得する
-                                QString areaName        = areaElement.firstChildElement("Name").text();
+                        }
 
-                                // Areaタグ内の震度を取得する
-                                int areaMaxInt   = ConvertJMAScale<int>(areaElement.firstChildElement("MaxInt").text());
+                        /// 発生した地震情報の地域に対して、震度の大きさで降順にソート
+                        if (m_Info.m_Points.count() > 1) {
+                            std::sort(m_Info.m_Points.begin(), m_Info.m_Points.end(), sortPoints);
+                        }
 
-                                POINT point = {.Addr   = areaName,
-                                    .Pref   = prefName,
-                                    .Scale  = areaMaxInt,
-                                    .IsArea = false
-                                };
-                                m_Info.m_Points.append(point);
-                            }
+                        /// 発生した地震情報から最も震度の大きい都道府県を取得
+                        m_Info.m_MaxIntPrefs     = GetMaxIntPrefs();
+
+                        /// 地震の情報を表すコード
+                        m_Info.m_Code            = 551;
+
+                        //m_Info.m_DomesticTsunami =   // 国内での津波の有無
+                        //m_Info.m_ForeignTsunami  =   // 海外での津波の有無
+                    }
+                    else {
+                        return -1;
+                    }
+                }
+                else {
+                    std::cout << QString("地震速報または震源・震度に関する情報ではないため、このデータを無視します").toStdString() << std::endl;
+                    return -1;
+                }
+
+                // Commentsタグ
+                QDomElement commentsElement = bodyElement.firstChildElement("Comments");
+                if (!commentsElement.isNull()) {
+                    // ForecastCommentタグ
+                    QDomElement forecastCommentElement = commentsElement.firstChildElement("ForecastComment");
+                    if (forecastCommentElement.attribute("codeType") == "固定付加文") {
+                        QDomElement textElement = forecastCommentElement.firstChildElement("Text");
+                        if (!textElement.isNull()) {
+                            m_Info.m_Text = textElement.text();
                         }
                     }
 
-                    /// 発生した地震情報の地域に対して、震度の大きさで降順にソート
-                    if (m_Info.m_Points.count() > 1) {
-                        std::sort(m_Info.m_Points.begin(), m_Info.m_Points.end(), sortPoints);
+                    // VarCommentタグ
+                    QDomElement varCommentElement = commentsElement.firstChildElement("VarComment");
+                    if (varCommentElement.attribute("codeType") == "固定付加文") {
+                        QDomElement textElement = varCommentElement.firstChildElement("Text");
+                        if (!textElement.isNull()) {
+                            m_Info.m_VarComment = textElement.text();
+                        }
                     }
 
-                    /// 発生した地震情報から最も震度の大きい都道府県を取得
-                    m_Info.m_MaxIntPrefs     = GetMaxIntPrefs();
-
-                    /// 地震の情報を表すコード
-                    m_Info.m_Code            = 551;
-
-                    //m_Info.m_DomesticTsunami =   // 国内での津波の有無
-                    //m_Info.m_ForeignTsunami  =   // 海外での津波の有無
-                }
-                else {
-                    return -1;
+                    // FreeFormCommentタグ
+                    QDomElement freeFormCommentElement = commentsElement.firstChildElement("FreeFormComment");
+                    if (freeFormCommentElement.attribute("codeType") == "固定付加文") {
+                        QDomElement textElement = freeFormCommentElement.firstChildElement("Text");
+                        if (!textElement.isNull()) {
+                            m_Info.m_FreeFormComment = textElement.text();
+                        }
+                    }
                 }
             }
             else {
-                std::cout << QString("地震速報または震源・震度に関する情報ではないため、このデータを無視します").toStdString() << std::endl;
                 return -1;
-            }
-
-            // Commentsタグ
-            QDomElement commentsElement = bodyElement.firstChildElement("Comments");
-            if (!commentsElement.isNull()) {
-                // ForecastCommentタグ
-                QDomElement forecastCommentElement = commentsElement.firstChildElement("ForecastComment");
-                if (forecastCommentElement.attribute("codeType") == "固定付加文") {
-                    QDomElement textElement = forecastCommentElement.firstChildElement("Text");
-                    if (!textElement.isNull()) {
-                        m_Info.m_Text = textElement.text();
-                    }
-                }
-
-                // VarCommentタグ
-                QDomElement varCommentElement = commentsElement.firstChildElement("VarComment");
-                if (varCommentElement.attribute("codeType") == "固定付加文") {
-                    QDomElement textElement = varCommentElement.firstChildElement("Text");
-                    if (!textElement.isNull()) {
-                        m_Info.m_VarComment = textElement.text();
-                    }
-                }
-
-                // FreeFormCommentタグ
-                QDomElement freeFormCommentElement = commentsElement.firstChildElement("FreeFormComment");
-                if (freeFormCommentElement.attribute("codeType") == "固定付加文") {
-                    QDomElement textElement = freeFormCommentElement.firstChildElement("Text");
-                    if (!textElement.isNull()) {
-                        m_Info.m_FreeFormComment = textElement.text();
-                    }
-                }
             }
         }
         else {
             return -1;
         }
     }
-    else {
-        return -1;
-    }
 
     return 0;
+}
+
+
+bool Worker::GetElementText(const QDomElement &parent, const QString &tagName, QString &result)
+{
+    QDomElement element = parent.firstChildElement(tagName);
+    if (element.isNull()) {
+        return false;
+    }
+
+    result = element.text();
+
+    return true;
 }
 
 
@@ -773,11 +1074,10 @@ int Worker::FormattingData_for_P2P()
 {
     // ダウンロードした地震情報のデータを読み込む
     auto responseData = m_ReplyData;
-    auto doc          = QJsonDocument::fromJson(responseData);
-
-    // ダウンロードした地震情報のデータを確認
-    if (!doc.isArray()) {
-        std::cerr << QString("エラー : ダウンロードした地震情報のデータに異常があります").toStdString() << std::endl;
+    QJsonParseError parseError;
+    const auto doc = QJsonDocument::fromJson(responseData, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        std::cerr << QString("エラー : P2P地震情報からダウンロードした地震情報のデータに異常があります %1").arg(parseError.errorString()).toStdString() << std::endl;
         return -1;
     }
 
@@ -821,9 +1121,6 @@ int Worker::FormattingData_for_P2P()
                 /// ログファイルに同じ地震IDが存在する場合は無視する
                 continue;
             }
-
-            /// 緊急地震速報(警報)のオブジェクトをクリア
-            m_Alert = EarthQuakeAlert();
 
             /// ユーザが設定した震度の閾値を確認
             /// 1つでも閾値以上の地震が各地域で予測される場合は、緊急地震速報(警報)の情報を取得
@@ -890,6 +1187,9 @@ int Worker::FormattingData_for_P2P()
 
                 /// IDを緊急地震速報(警報)のログファイルに保存
                 m_Alert.m_ID = obj["id"].toString();
+
+                /// 取得した地震情報のURLを指定
+                m_Alert.m_URL = m_CommonData.EQInfoURL;
             }
         }
         else if (code == 551) {
@@ -953,9 +1253,6 @@ int Worker::FormattingData_for_P2P()
             }
 
             bNewEarthQuake = true;
-
-            /// 発生した地震情報のオブジェクトをクリア
-            m_Info = EarthQuakeInfo();
 
             /// ユーザが設定した震度以上の地域が存在する場合、発生した地震情報を取得
             /// 発生した地震情報が出ている地域を取得
@@ -1036,8 +1333,11 @@ int Worker::FormattingThreadInfo()
                                                                               !timeStr.isEmpty() ? QString("発現時刻 %1 ").arg(timeStr) : QString(""));
 
         // スレッドの内容
+        /// ヘッドライン
+        m_ThreadInfo.message  = m_Alert.m_Headline.isEmpty() ? "" : QString("%1").arg(m_Alert.m_Headline + "\n\n");
+
         /// 震源地
-        m_ThreadInfo.message  = name.isEmpty() ? QString("震源地 : 不明") + "\n" : QString("震源地 : %1").arg(name + "\n");
+        m_ThreadInfo.message += name.isEmpty() ? QString("震源地 : 不明") + "\n" : QString("震源地 : %1").arg(name + "\n");
 
         /// マグニチュード
         m_ThreadInfo.message += magnitude.isEmpty() ? QString("マグニチュードの情報なし") + "\n" : QString(magnitude + "\n");
@@ -1063,11 +1363,11 @@ int Worker::FormattingThreadInfo()
         }
 
         /// 地震発生時刻
-        auto originTime     = m_Alert.m_OriginTime.isEmpty() ? QString("") + "\n" : QString("地震発生時刻 : %1").arg(m_Alert.m_OriginTime + "\n");
+        auto originTime     = m_Alert.m_OriginTime.isEmpty() ? QString("地震発生時刻 : 不明") + "\n" : QString("地震発生時刻 : %1").arg(m_Alert.m_OriginTime + "\n");
         m_ThreadInfo.message += originTime;
 
         /// 地震発現(到達)時刻
-        auto arrivalTime    = m_Alert.m_ArrivalTime.isEmpty() ? QString("") + "\n" : QString("地震発現(到達)時刻 : %1").arg(m_Alert.m_ArrivalTime + "\n\n");
+        auto arrivalTime    = m_Alert.m_ArrivalTime.isEmpty() ? QString("地震発現(到達)時刻 : 不明") + "\n" : QString("地震発現(到達)時刻 : %1").arg(m_Alert.m_ArrivalTime + "\n\n");
         m_ThreadInfo.message += arrivalTime;
 
         /// 緊急地震速報(警報)の対象地域
@@ -1114,6 +1414,11 @@ int Worker::FormattingThreadInfo()
 
         if (kindcode) {
             m_ThreadInfo.message += "\n" + QString("既に地震が到達していると予想されます") + "\n";
+        }
+
+        // 固定付加文
+        if (!m_Alert.m_Text.isEmpty()) {
+            m_ThreadInfo.message += "\n" + m_Alert.m_Text + "\n";
         }
     }
     else if (m_Info.m_Code == 551) {
@@ -1342,20 +1647,26 @@ int Worker::Post(int EQCode, bool bCreateThread)
             return -1;
         }
 
-        // 発生した地震情報の場合、新規作成したスレッドのURLとスレッド番号を取得
-        if (EQCode == 551) {
-            m_InfoLog.ThreadURL = poster.GetNewThreadURL();
-            m_InfoLog.ThreadNum = poster.GetNewThreadNum();
-        }
+        // 新規作成したスレッドのURLとスレッド番号を取得
+        auto threadURL = poster.GetNewThreadURL();
+        auto threadNum = poster.GetNewThreadNum();
 
-        // 発生した地震情報の場合、新規作成したスレッドにアクセスしてタイトルを抽出
-        if (EQCode == 551) {
-            HtmlFetcher fetcher(nullptr);
-            if (fetcher.fetch(m_InfoLog.ThreadURL, true, m_CommonData.ExpiredXPath, m_ThreadInfo.shiftjis) == 0) {
-                // 新規作成したスレッドのタイトル抽出に成功した場合
-                m_InfoLog.Title = fetcher.GetElement();
+        // 新規作成したスレッドにアクセスしてタイトルを抽出
+        HtmlFetcher fetcher(nullptr);
+        if (fetcher.fetch(threadURL, true, m_CommonData.ExpiredXPath, m_ThreadInfo.shiftjis) == 0) {
+            // 新規作成したスレッドのタイトル抽出に成功した場合
+            if (EQCode == 556) {
+                m_AlertLog.Title     = fetcher.GetElement();
+                m_AlertLog.ThreadURL = threadURL;
+                m_AlertLog.ThreadNum = threadNum;
+            }
+            else if (EQCode == 551) {
+                m_InfoLog.Title     = fetcher.GetElement();
+                m_InfoLog.ThreadURL = threadURL;
+                m_InfoLog.ThreadNum = threadNum;
             }
         }
+
     }
     else {
         // 既存のスレッドに書き込む
@@ -1370,51 +1681,100 @@ int Worker::Post(int EQCode, bool bCreateThread)
 }
 
 
-// 地震IDを保存している緊急地震速報のログファイルから地震IDを検索する
-bool Worker::SearchAlertEQID(const QString &ID) const
+// 緊急地震速報(警報)のログファイルから地震情報を検索する
+bool Worker::SearchAlertEQID(const QString &searchValue) const
 {
-    // ログファイルを読み込む
-    QFile File(m_CommonData.LogFile);
-    if (!File.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        std::cerr << QString("エラー : 地震情報のログファイルのオープンに失敗しました %1").arg(File.errorString()).toStdString() << std::endl;
+    QFileInfo alertLogFileInfo(m_CommonData.LogFile);
+    QString   lockFilePath = alertLogFileInfo.dir().filePath(alertLogFileInfo.baseName() + ".lock");
+    QLockFile lockFile(lockFilePath);
+
+    // 最大30秒の間に、システムは繰り返しロックの取得を試みる
+    if (!lockFile.tryLock(30000)) {
+        std::cerr << QString("エラー: 30秒以内に緊急地震速報のログファイルのロックの取得に失敗しました").toStdString() << std::endl;
         return false;
     }
+
+    // ロックの解除とファイルの削除を保証 (RAIIパターンを使用)
+    LockFileGuard guard(lockFile);
 
     try {
-        QTextStream in(&File);
-        while (!in.atEnd()) {
-            auto line = in.readLine();
-            if (line == ID) {
+        // 緊急地震速報のログファイルを読み込む
+        QFile alertLogFile(m_CommonData.LogFile);
+        if (!alertLogFile.open(QIODevice::ReadOnly)) {
+            throw std::runtime_error(QString("エラー : 緊急地震速報のログファイルのオープンに失敗しました %1").arg(alertLogFile.errorString()).toStdString());
+        }
 
+        QJsonDocument jsonDoc = QJsonDocument::fromJson(alertLogFile.readAll());
+
+        // 緊急地震速報のログファイルを閉じる
+        alertLogFile.close();
+
+        if (jsonDoc.isNull()) {
+            throw std::runtime_error("エラー: 緊急地震速報のログファイルが不正です");
+        }
+
+        QJsonArray jsonArray = jsonDoc.array();
+        for (const QJsonValue &value : jsonArray) {
+            QJsonObject obj = value.toObject();
+            if (m_CommonData.iGetInfo == 0) {
+                // JMAから緊急地震速報 (警報) を取得している場合
+                if (obj["url"].toString() == searchValue) {
+                    // 書き込み済みの緊急地震速報 (警報) のデータが存在する場合
 #ifdef _DEBUG
-                std::cout << QString("同じ地震IDが存在するため、この地震情報を無視します : %1").arg(ID).toStdString() << std::endl;
+                    std::cout << QString("同じ緊急地震速報(警報)が存在するため、この地震情報を無視します : %1").arg(searchValue).toStdString() << std::endl;
 #endif
-
-                File.close();
-                return false;
+                    return false;
+                }
+            }
+            else {
+                // P2P地震情報から緊急地震速報 (警報) を取得している場合
+                if (obj["id"].toString() == searchValue) {
+                    // 書き込み済みの緊急地震速報 (警報) のデータが存在する場合
+#ifdef _DEBUG
+                    std::cout << QString("同じ地震IDが存在するため、この地震情報を無視します : %1").arg(searchValue).toStdString() << std::endl;
+#endif
+                    return false;
+                }
             }
         }
-    }
-    catch (QException &ex) {
-        std::cerr << QString("エラー : 地震情報のログファイルの読み込みに失敗しました %1").arg(ex.what()).toStdString() << std::endl;
-        if (File.isOpen()) File.close();
 
+#ifdef _DEBUG
+    std::cout << QString("同じ地震情報は存在しないため、緊急地震速報(警報)の取得を開始します").toStdString() << std::endl;
+    std::cout << QString("地震ID または テストファイルのパス : %1").arg(searchValue).toStdString() << std::endl;
+#endif
+
+    }
+    catch (const std::exception &ex) {
+        std::cerr << QString("エラー: %1").arg(ex.what()).toStdString() << std::endl;
+        return false;
+    }
+    catch (...) {
+        std::cerr << QString("エラー: 予期しないエラーが発生しました (緊急地震速報 (警報))").toStdString() << std::endl;
         return false;
     }
 
-    File.close();
-
-#ifdef _DEBUG
-    std::cout << QString("同じ地震IDは存在しないため、地震情報の取得を開始します : %1").arg(ID).toStdString() << std::endl;
-#endif
-
+    // guardのデストラクタが呼ばれてロックが解除される
+    // 可能であればロックファイルが削除される
     return true;
 }
 
 
-// 地震IDを保存している発生した地震情報のログファイルから地震IDを検索する
+// 発生した地震情報のログファイルから地震IDを検索する
 bool Worker::SearchInfoEQID(const QString &ID) const
 {
+    QFileInfo infoLogFileInfo(m_CommonData.LogFile);
+    QString   lockFilePath = infoLogFileInfo.dir().filePath(infoLogFileInfo.baseName() + ".lock");
+    QLockFile lockFile(lockFilePath);
+
+    // 最大30秒の間に、システムは繰り返しロックの取得を試みる
+    if (!lockFile.tryLock(30000)) {
+        std::cerr << QString("エラー: 30秒以内にログファイルのロックの取得に失敗しました").toStdString() << std::endl;
+        return false;
+    }
+
+    // ロックの解除とファイルの削除を保証 (RAIIパターンを使用)
+    LockFileGuard guard(lockFile);
+
     // ログファイルを読み込む
     QFile File(m_CommonData.LogFile);
     if (!File.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -1422,43 +1782,44 @@ bool Worker::SearchInfoEQID(const QString &ID) const
         return false;
     }
 
-    QJsonDocument document;
-    try {
-        document = QJsonDocument::fromJson(File.readAll());
-        File.close();
-    }
-    catch (QException &ex) {
-        std::cerr << QString("エラー : 地震情報のログファイルの読み込みに失敗しました %1").arg(ex.what()).toStdString() << std::endl;
+    QJsonParseError parseError;
+    const auto document = QJsonDocument::fromJson(File.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
         if (File.isOpen()) File.close();
+        std::cerr << QString("エラー: 地震情報のログファイルの読み込みに失敗しました %1").arg(parseError.errorString()).toStdString() << std::endl;
 
         return false;
     }
+
+    // ファイルを閉じる
+    File.close();
 
     if (!document.isArray()) {
         std::cerr << QString("エラー : 地震情報のログファイルの値が不正です").toStdString() << std::endl;
         return false;
     }
 
-    QJsonArray jsonArray = document.array();
-    for (const auto &value : jsonArray) {
-        auto obj     = value.toObject();
-        auto idArray = obj["id"].toArray();
+    const auto jsonArray = document.array();
+    const bool idExists = std::any_of(jsonArray.begin(), jsonArray.end(), [&ID](const auto &value) {
+        const auto idArray = value.toObject()["id"].toArray();
+        return std::any_of(idArray.begin(), idArray.end(), [&ID](const auto &idValue) {
+            return idValue.toString().compare(ID, Qt::CaseSensitive) == 0;
+        });
+    });
 
-        for (const auto &idValue : idArray) {
-            if (idValue.toString().compare(ID, Qt::CaseSensitive) == 0) {
-                // 既に地震IDが存在する場合
+    if (idExists) {
 #ifdef _DEBUG
-                std::cout << QString("同じ地震IDが存在するため、この地震情報を無視します : %1").arg(ID).toStdString() << std::endl;
+        std::cout << QString("同じ地震IDが存在するため、この地震情報を無視します : %1").arg(ID).toStdString() << std::endl;
 #endif
-                return false;
-            }
-        }
+        return false;
     }
 
 #ifdef _DEBUG
     std::cout << QString("同じ地震IDは存在しないため、地震情報の取得を開始します : %1").arg(ID).toStdString() << std::endl;
 #endif
 
+    // guardのデストラクタが呼ばれてロックが解除される
+    // 可能であればロックファイルが削除される
     return true;
 }
 
@@ -1466,22 +1827,30 @@ bool Worker::SearchInfoEQID(const QString &ID) const
 // 地震情報のログファイルから同じ地震IDの"ReportDateTime"キーの日時が存在するかどうかを確認する
 bool Worker::SearchInfoEQID(const QString &ID, const QString &reportDateTime) const
 {
+    QFileInfo infoLogFileInfo(m_CommonData.LogFile);
+    QString   lockFilePath = infoLogFileInfo.dir().filePath(infoLogFileInfo.baseName() + ".lock");
+    QLockFile lockFile(lockFilePath);
+
+    // 最大30秒の間に、システムは繰り返しロックの取得を試みる
+    if (!lockFile.tryLock(30000)) {
+        std::cerr << QString("エラー: 30秒以内にログファイルのロックの取得に失敗しました").toStdString() << std::endl;
+        return false;
+    }
+
+    // ロックの解除とファイルの削除を保証 (RAIIパターンを使用)
+    LockFileGuard guard(lockFile);
+
     // ログファイルを読み込む
     QFile File(m_CommonData.LogFile);
     if (!File.open(QIODevice::ReadOnly | QIODevice::Text)) {
         std::cerr << QString("エラー : 地震情報のログファイルのオープンに失敗しました %1").arg(File.errorString()).toStdString() << std::endl;
-            return false;
+        return false;
     }
 
-    QJsonDocument document;
-    try {
-        document = QJsonDocument::fromJson(File.readAll());
-        File.close();
-    }
-    catch (QException &ex) {
-        std::cerr << QString("エラー : 地震情報のログファイルの読み込みに失敗しました %1").arg(ex.what()).toStdString() << std::endl;
-        if (File.isOpen()) File.close();
-
+    QJsonParseError parseError;
+    const auto document = QJsonDocument::fromJson(File.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        std::cerr << QString("エラー : 地震情報のログファイルの読み込みに失敗しました %1").arg(parseError.errorString()).toStdString() << std::endl;
         return false;
     }
 
@@ -1490,22 +1859,21 @@ bool Worker::SearchInfoEQID(const QString &ID, const QString &reportDateTime) co
         return false;
     }
 
-    QJsonArray jsonArray = document.array();
+    const auto jsonArray = document.array();
     for (const auto &value : jsonArray) {
-        auto obj     = value.toObject();
-        auto idArray = obj["id"].toArray();
+        const auto obj = value.toObject();
+        const auto idArray = obj["id"].toArray();
 
-        for (const auto &idValue : idArray) {
-            if (idValue.toString().compare(ID, Qt::CaseSensitive) == 0) {
-                // 既に地震IDが存在する場合
+        if (std::any_of(idArray.begin(), idArray.end(), [&ID](const auto &idValue) {
+                return idValue.toString().compare(ID, Qt::CaseSensitive) == 0;
+            })) {
+            const auto dateTime = obj["reportdatetime"].toString();
 
-                auto dateTime = obj["reportdatetime"].toString("");
-                if (dateTime.compare(reportDateTime, Qt::CaseSensitive) == 0) {
+            if (dateTime == reportDateTime) {
 #ifdef _DEBUG
-                    std::cout << QString("同じ地震IDに同じ\"reportdatetime\"キーの値が存在するため、この地震情報を無視します : %1").arg(ID).toStdString() << std::endl;
+                std::cerr << QString("同じ地震IDに同じ\"reportdatetime\"キーの値が存在するため、この地震情報を無視します: %1").arg(ID).toStdString();
 #endif
-                    return false;
-                }
+                return false;
             }
         }
     }
@@ -1514,6 +1882,8 @@ bool Worker::SearchInfoEQID(const QString &ID, const QString &reportDateTime) co
     std::cout << QString("同じ地震IDは存在しないため、地震情報の取得を開始します : %1").arg(ID).toStdString() << std::endl;
 #endif
 
+    // guardのデストラクタが呼ばれてロックが解除される
+    // 可能であればロックファイルが削除される
     return true;
 }
 
@@ -1652,7 +2022,7 @@ QStringList Worker::GetMaxIntPrefs()
 }
 
 
-// ISO 8601形式の時刻を"yyyy年M月d日 h時m分"形式に変換する
+// ISO 8601形式の時刻を"yyyy/MM/dd HH:mm:ss"形式に変換する
 QString Worker::ConvertDateTimeFormat(const QString &inputDateTime)
 {
     QDateTime dateTime = QDateTime::fromString(inputDateTime, Qt::ISODateWithMs);
@@ -2204,46 +2574,98 @@ EarthQuakeAlert& EarthQuakeAlert::operator=(const EarthQuakeAlert &obj)
 }
 
 
-int EarthQuakeAlert::AddInfo(const QString &fileName)
+// 緊急地震速報(警報)のログファイルに地震情報を追加する
+int EarthQuakeAlert::AddLog(const QString &fileName, ALERTLOG &alertLog)
 {
-    // ミューテックスをロックして、スレッドセーフを保証
-    QMutexLocker locker(&m_Mutex);
+    QFileInfo alertLogFileInfo(fileName);
+    QString   lockFilePath = alertLogFileInfo.dir().filePath(alertLogFileInfo.baseName() + ".lock");
+    QLockFile lockFile(lockFilePath);
 
-    // 緊急地震速報(警報)の情報を追加
-    QFile File(fileName);
-    if (!File.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        std::cerr << QString("エラー : 地震情報のファイルオープンに失敗 %1").arg(File.errorString()).toStdString() << std::endl;
+    // 最大30秒の間に、システムは繰り返しロックの取得を試みる
+    if (!lockFile.tryLock(30000)) {
+        std::cerr << QString("エラー: 30秒以内にログファイルのロックの取得に失敗しました").toStdString() << std::endl;
         return -1;
     }
 
-    try {
-        // ファイル内容を読み込む
-        QTextStream in(&File);
-        auto originalContent = in.readAll();
-        File.close();
+    // ロックの解除とファイルの削除を保証 (RAIIパターンを使用)
+    LockFileGuard guard(lockFile);
 
-        // ファイル内容を書き込むために再度ファイルを開く
-        if (!File.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
-            std::cerr << QString("エラー : 地震情報のファイルオープンに失敗 %1").arg(File.errorString()).toStdString() << std::endl;
-            return -1;
+    // 緊急地震速報(警報)の情報を追加
+    try {
+        // 緊急地震速報(警報)のログファイルを開く
+        QFile File(fileName);
+        if (!File.open(QIODevice::ReadWrite)) {
+            throw QString("エラー : 緊急地震速報(警報)のログファイルのオープンに失敗 %1").arg(File.errorString()).toStdString();
         }
 
-        // 新しい地震IDを先頭にして書き込む
-        QTextStream out(&File);
-        QString newContent = m_ID + "\n" + originalContent;
-        out << newContent;
+        // 緊急地震速報(警報)のログファイルを読み込む
+        QByteArray jsonData = File.readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(jsonData);
+
+        if (!doc.isArray()) {
+            throw std::runtime_error("緊急地震速報(警報)のログファイルがJSON配列ではありません");
+        }
+
+        QJsonArray jsonArray = doc.array();
+
+        // 新しい地震オブジェクトを作成
+        QJsonObject newObj;
+        newObj["id"]             = m_ID;                // 地震ID
+        newObj["reportdatetime"] = m_ReportDateTime;    // 緊急地震速報の報告時刻
+        newObj["url"]            = m_URL;               // 緊急地震速報(警報)のURL
+        newObj["threadtitle"]    = alertLog.Title;      // スレッドのタイトル
+        newObj["threadkey"]      = alertLog.ThreadNum;  // スレッドのキー
+        newObj["threadurl"]      = alertLog.ThreadURL;  // スレッドのURL
+
+        // 新しいオブジェクトをJSONデータに追加
+        jsonArray.append(newObj);
+        doc.setArray(jsonArray);
+
+        // 更新したJSONデータを緊急地震速報(警報)のログファイルに書き込む
+        File.seek(0);    // ファイルの先頭に移動
+        File.resize(0);  // ファイルをクリア
+
+        if (File.write(doc.toJson()) == -1) {
+            throw std::runtime_error("緊急地震速報(警報)のログファイルの書き込みに失敗しました");
+        }
 
         // ファイルを閉じる
         File.close();
     }
-    catch (QException &ex) {
-        std::cerr << QString("エラー : 地震情報の書き込みに失敗 %1").arg(ex.what()).toStdString() << std::endl;
-        if (File.isOpen()) File.close();
-
+    catch (const std::runtime_error &ex) {
+        std::cerr << QString("エラー : 緊急地震速報(警報)のログファイルの更新に失敗しました %1").arg(ex.what()).toStdString() << std::endl;
+        return -1;
+    }
+    catch (const std::exception &ex) {
+        std::cerr << QString("エラー : 予期せぬエラーが発生しました %1").arg(ex.what()).toStdString() << std::endl;
         return -1;
     }
 
+    // guardのデストラクタが呼ばれてロックが解除される
+    // 可能であればロックファイルが削除される
     return 0;
+}
+
+
+// 各メンバ変数を初期化する
+void EarthQuakeAlert::reset()
+{
+    m_Code = 0;
+    m_ID.clear();
+    m_Headline.clear();
+    m_Name.clear();
+    m_Depth.clear();
+    m_Magnitude.clear();
+    m_Latitude.clear();
+    m_Longitude.clear();
+    m_OriginTime.clear();
+    m_ArrivalTime.clear();
+    m_ReportDateTime.clear();
+    m_Areas.clear();
+    m_Text.clear();
+    m_VarComment.clear();
+    m_FreeFormComment.clear();
+    m_URL.clear();
 }
 
 
@@ -2297,8 +2719,18 @@ EarthQuakeInfo& EarthQuakeInfo::operator=(const EarthQuakeInfo &obj)
 // 発生した地震情報のログファイルに地震情報を追加する
 int EarthQuakeInfo::AddInfo(const QString &fileName, const QString &title, const QString &url, const QString &thread, int GetInfo)
 {
-    // ミューテックスをロックして、スレッドセーフを保証
-    QMutexLocker locker(&m_Mutex);
+    QFileInfo alertLogFileInfo(fileName);
+    QString   lockFilePath = alertLogFileInfo.dir().filePath(alertLogFileInfo.baseName() + ".lock");
+    QLockFile lockFile(lockFilePath);
+
+    // 最大30秒の間に、システムは繰り返しロックの取得を試みる
+    if (!lockFile.tryLock(30000)) {
+        std::cerr << QString("エラー: 30秒以内にログファイルのロックの取得に失敗しました").toStdString() << std::endl;
+        return -1;
+    }
+
+    // ロックの解除とファイルの削除を保証 (RAIIパターンを使用)
+    LockFileGuard guard(lockFile);
 
     // 地震情報の更新
     QFile File(fileName);
@@ -2354,6 +2786,8 @@ int EarthQuakeInfo::AddInfo(const QString &fileName, const QString &title, const
         return -1;
     }
 
+    // guardのデストラクタが呼ばれてロックが解除される
+    // 可能であればロックファイルが削除される
     return 0;
 }
 
@@ -2363,10 +2797,20 @@ int EarthQuakeInfo::AddInfo(const QString &fileName, const QString &title, const
 // !chttコマンドを使用しない場合 : 発生日時、地震IDを更新
 int EarthQuakeInfo::UpdateInfo(const QString &fileName, bool bChangeTitle, const QString &title, int GetInfo)
 {
-    // ミューテックスをロックして、スレッドセーフを保証
-    QMutexLocker locker(&m_Mutex);
+    QFileInfo infoLogFileInfo(fileName);
+    QString   lockFilePath = infoLogFileInfo.dir().filePath(infoLogFileInfo.baseName() + ".lock");
+    QLockFile lockFile(lockFilePath);
 
-    // 地震情報の更新
+    // 最大30秒の間に、システムは繰り返しロックの取得を試みる
+    if (!lockFile.tryLock(30000)) {
+        std::cerr << QString("エラー: 30秒以内に緊急地震速報のログファイルのロックの取得に失敗しました").toStdString() << std::endl;
+        return -1;
+    }
+
+    // ロックの解除とファイルの削除を保証 (RAIIパターンを使用)
+    LockFileGuard guard(lockFile);
+
+    // 発生した地震情報のログファイルを更新
     QFile File(fileName);
     if (!File.open(QIODevice::ReadOnly | QIODevice::Text)) {
         std::cerr << QString("エラー : 地震情報のログファイルのオープンに失敗 %1").arg(File.errorString()).toStdString() << std::endl;
@@ -2482,7 +2926,35 @@ int EarthQuakeInfo::UpdateInfo(const QString &fileName, bool bChangeTitle, const
         return -1;
     }
 
+    // guardのデストラクタが呼ばれてロックが解除される
+    // 可能であればロックファイルが削除される
     return 0;
+}
+
+
+// 各メンバ変数を初期化する
+void EarthQuakeInfo::reset()
+{
+    m_Code = 0;
+    m_ID.clear();
+    m_Headline.clear();
+    m_Name.clear();
+    m_Depth.clear();
+    m_Magnitude.clear();
+    m_Latitude.clear();
+    m_Longitude.clear();
+    m_Time.clear();
+    m_MaxScale.clear();
+    m_DomesticTsunami.clear();
+    m_ForeignTsunami.clear();
+    m_Points.clear();
+    m_Text.clear();
+    m_VarComment.clear();
+    m_FreeFormComment.clear();
+    m_ReportDateTime.clear();
+    m_ImageSiteURL.clear();
+    m_ImageURL.clear();
+    m_MaxIntPrefs.clear();
 }
 
 

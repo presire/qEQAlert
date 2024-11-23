@@ -1,16 +1,15 @@
 cmake_minimum_required(VERSION 3.18)
-project(qEQAlert VERSION 0.3.0 LANGUAGES CXX)
+project(qEQAlert VERSION 0.4.0 LANGUAGES C CXX)
 
 
 # Linuxのみビルドを許可
-if(NOT UNIX OR APPLE)
-  message(FATAL_ERROR "本ソフトウェアは、Linuxでのみビルドできます")
+if(NOT (UNIX AND NOT APPLE AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "BSD"))
+    message(FATAL_ERROR "本ソフトウェアは、Linuxでのみビルドできます")
 endif()
 
 
-set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTORCC ON)
+
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,6 +60,7 @@ link_directories(${LIBXML2_LIBRARY_DIRS})
 
 
 # pkg-configを使用してライブラリを検索
+# システムにQt6とQt5の両方がインストールされている場合は、Qt6を優先する
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Network Xml)
 
 if(${QT_VERSION_MAJOR} EQUAL 5)
@@ -68,7 +68,7 @@ if(${QT_VERSION_MAJOR} EQUAL 5)
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network Xml)
 elseif(${QT_VERSION_MAJOR} EQUAL 6)
     message("Use Qt 6.")
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network Xml Core5Compat)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network Xml)
 
     # OpenSSL 3ライブラリを検索
     find_package(OpenSSL 3 REQUIRED)
@@ -88,12 +88,13 @@ endif()
 
 add_executable(qEQAlert
     main.cpp
-    Runner.cpp Runner.h
-    EarthQuake.cpp EarthQuake.h
-    HtmlFetcher.cpp HtmlFetcher.h
-    Poster.cpp Poster.h
-    Image.cpp Image.h
-    CommandLineParser.h CommandLineParser.cpp
+    Runner.cpp              Runner.h
+    EarthQuake.cpp          EarthQuake.h
+    HtmlFetcher.cpp         HtmlFetcher.h
+    Poster.cpp              Poster.h
+    Image.cpp               Image.h
+    LockFileGuard.cpp       LockFileGuard.h
+    CommandLineParser.cpp   CommandLineParser.h
 )
 
 
@@ -151,12 +152,7 @@ elseif(${QT_VERSION_MAJOR} EQUAL 6)
 endif()
 
 
-# target_link_libraries(qEQAlert PRIVATE
-#         Qt${QT_VERSION_MAJOR}::Core
-#         Qt${QT_VERSION_MAJOR}::Network
-#         Qt${QT_VERSION_MAJOR}::Xml
-#         ${LIBXML2_LIBRARIES}
-# )
+# ライブラリのリンク
 if(${QT_VERSION_MAJOR} EQUAL 5)
     target_link_libraries(qEQAlert PRIVATE
             Qt${QT_VERSION_MAJOR}::Core
@@ -169,7 +165,6 @@ elseif(${QT_VERSION_MAJOR} EQUAL 6)
             Qt${QT_VERSION_MAJOR}::Core
             Qt${QT_VERSION_MAJOR}::Network
             Qt${QT_VERSION_MAJOR}::Xml
-            Qt${QT_VERSION_MAJOR}::Core5Compat
             ${LIBXML2_LIBRARIES}
             OpenSSL::SSL
             OpenSSL::Crypto
@@ -200,10 +195,9 @@ install(FILES
 
 
 ## Systemdサービスファイル
-if(UNIX AND NOT APPLE)
+if(NOT (UNIX AND NOT APPLE AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "BSD"))
     ## PID (プロセスID) ディレクトリのオプション
     set(PID "/var/run" CACHE PATH "Directory to qEQAlert.pid")
-
 
     # Systemdサービスファイルのインストールルール
     ## SYSTEMDオプションを定義 (デフォルトはOFF)
@@ -252,7 +246,7 @@ endif()
 
 
 ## ワンショット用ラッパーシェルスクリプト
-if(UNIX)
+if(NOT (UNIX AND NOT APPLE AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "BSD"))
     ## ワンショット用ラッパーシェルスクリプトのインストールルール
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Scripts/qEQAlert.sh.in ${CMAKE_CURRENT_BINARY_DIR}/Scripts/qEQAlert.sh @ONLY)
 

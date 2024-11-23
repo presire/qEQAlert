@@ -1,11 +1,17 @@
-#include <QTextCodec>
+#include <QtGlobal>
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    #include <QStringEncoder>
+#else
+    #include <QTextCodec>
+#endif
+
 #include <iostream>
 #include "HtmlFetcher.h"
 
 
 HtmlFetcher::HtmlFetcher(QObject *parent) : m_pManager(std::make_unique<QNetworkAccessManager>(this)) , QObject{parent}
 {
-
 }
 
 
@@ -54,9 +60,16 @@ int HtmlFetcher::fetchElement(QNetworkReply *reply, const QString &_xpath, bool 
 
     QString htmlContent;
     if (bShiftJIS) {
-        // Shift-JISからUTF-8へエンコード
+        // Shift-JISからUTF-8へデコード
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QByteArray SJISData = reply->readAll();
+
+        QStringDecoder decoder("Shift-JIS");
+        htmlContent         = decoder.decode(SJISData);
+#else
         auto codec  = QTextCodec::codecForName("Shift-JIS");
         htmlContent = codec->toUnicode(reply->readAll());
+#endif
     }
     else {
          htmlContent = reply->readAll();
@@ -70,7 +83,7 @@ int HtmlFetcher::fetchElement(QNetworkReply *reply, const QString &_xpath, bool 
     // libxml2ではエンコーディングの自動判定において問題があるため、エンコーディングを明示的に指定する
     xmlDocPtr doc = htmlReadDoc((const xmlChar*)htmlContent.toStdString().c_str(), nullptr, "UTF-8", HTML_PARSE_RECOVER | HTML_PARSE_NOERROR | HTML_PARSE_NOWARNING);
     if (doc == nullptr) {
-         std::cerr << QString("エラー: スレッドURLからHTMLのパースに失敗しました").toStdString() << std::endl;
+        std::cerr << QString("エラー: スレッドURLからHTMLのパースに失敗しました").toStdString() << std::endl;
         reply->deleteLater();
 
         return -1;
@@ -102,7 +115,7 @@ int HtmlFetcher::fetchElement(QNetworkReply *reply, const QString &_xpath, bool 
         }
     }
 
-    // エレメントを取得
+    // 要素を取得
     m_Element = content;
 
     xmlXPathFreeObject(result);
@@ -119,20 +132,28 @@ xmlXPathObjectPtr HtmlFetcher::getNodeset(xmlDocPtr doc, const xmlChar *xpath)
 {
     xmlXPathContextPtr context = xmlXPathNewContext(doc);
     if (context == nullptr) {
-        std::cerr << "Error in xmlXPathNewContext" << std::endl;
+        std::cerr << QString("エラー: XPathコンテキストの作成に失敗しました").toStdString() << std::endl;
+        std::cerr << QString("理由: メモリ不足か、無効なドキュメントが渡された可能性があります").toStdString() << std::endl;
+        std::cerr << QString("対処法: システムのメモリ状況を確認して、ドキュメントが正しく初期化されているか確認してください").toStdString() << std::endl;
         return nullptr;
     }
 
     xmlXPathObjectPtr result = xmlXPathEvalExpression(xpath, context);
     xmlXPathFreeContext(context);
     if (result == nullptr) {
-        std::cerr << "Error in xmlXPathEvalExpression" << std::endl;
+        std::cerr << QString("エラー: XPath式の評価に失敗しました").toStdString() << std::endl;
+        std::cerr << QString("理由: 無効なXPath式 または 評価中にエラーが発生した可能性があります").toStdString() << std::endl;
+        std::cerr << QString("対処法: 以下を確認してください: ").toStdString() << std::endl;
+        std::cerr << QString("  1. XPath式の構文が正しいかどうかを確認する").toStdString() << std::endl;
+        std::cerr << QString("  2. 式で参照している要素やノードがXMLドキュメント内に存在するかどうかを確認する").toStdString() << std::endl;
+        std::cerr << QString("  3. 名前空間が適切に定義されているかどうかを確認する (名前空間を使用している場合)").toStdString() << std::endl;
+        std::cerr << QString("XPath式: %1").arg(QString::fromUtf8(reinterpret_cast<const char*>(xpath))).toStdString() << std::endl;
         return nullptr;
     }
 
     if (xmlXPathNodeSetIsEmpty(result->nodesetval)) {
         xmlXPathFreeObject(result);
-        std::cerr << "No result" << std::endl;
+        std::cerr << QString("取得した要素が空です").toStdString() << std::endl;
         return nullptr;
     }
 
@@ -191,7 +212,7 @@ int HtmlFetcher::extractThreadPath(const QString &htmlContent, const QString &bb
                 m_ThreadNum = MatchThreadNum.captured(1);
 
 #ifdef _DEBUG
-                std::cout << "スレッド番号 : " << m_ThreadNum.toStdString() << std::endl;
+                std::cout << QString("スレッド番号 : %1").arg(m_ThreadNum).toStdString() << std::endl;
 #endif
             }
 
@@ -242,7 +263,7 @@ int HtmlFetcher::fetchLastThreadNum(const QUrl &url, bool redirect, const QStrin
     // レスポンスの取得
     if (pReply->error() != QNetworkReply::NoError) {
         std::cerr << QString("エラー : %1").arg(pReply->errorString()).toStdString() << std::endl;
-                                                                                                 pReply->deleteLater();
+        pReply->deleteLater();
 
         return -1;
     }
@@ -268,7 +289,7 @@ int HtmlFetcher::fetchLastThreadNum(const QUrl &url, bool redirect, const QStrin
     xmlXPathObjectPtr result = getNodeset(doc, xpath);
     if (result == nullptr) {
         std::cerr << QString("エラー : ノードの取得に失敗").toStdString() << std::endl;
-                         xmlFreeDoc(doc);
+        xmlFreeDoc(doc);
         pReply->deleteLater();
 
         return -1;
@@ -320,7 +341,7 @@ QString HtmlFetcher::GetThreadNum() const
 }
 
 
-// エレメントを取得する
+// 要素を取得する
 QString HtmlFetcher::GetElement() const
 {
     return m_Element;

@@ -4,6 +4,7 @@
         "alertlog": "/tmp/eqalert.log",
         "alertscale": 50,
         "alerturl": {
+            "jma": "https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml",
             "p2p": "https://api.p2pquake.net/v2/history?codes=556&limit=1&offset=0"
         },
         "get": 0,
@@ -25,7 +26,10 @@
         "imgxpath": "/html/body/div[@id='wrapper']/div[@id='contents']/div[@id='contents-body']/div[@id='main']/div[@id='yjw_keihou']/div[@class='earthquakeView']/div[@id='earthquake-01']/img/@src",
         "url": "https://typhoon.yahoo.co.jp/weather/jp/earthquake/list/"
     },
-    "interval": 10,
+    "interval": {
+        "alert": 10,
+        "info": 30
+    },
     "oneshot": false,
     "thread": {
         "bbs": "",

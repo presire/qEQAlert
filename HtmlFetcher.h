@@ -37,7 +37,7 @@ public:   // Methods
 
     [[nodiscard]] QString GetThreadPath() const;                                    // スレッドのパスを取得する
     [[nodiscard]] QString GetThreadNum() const;                                     // スレッド番号を取得する
-    [[nodiscard]] QString GetElement() const;                                       // エレメントを取得する
+    [[nodiscard]] QString GetElement() const;                                       // 要素を取得する
 
 signals:
 

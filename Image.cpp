@@ -1,4 +1,11 @@
-#include <QTextCodec>
+#include <QtGlobal>
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    #include <QStringEncoder>
+#else
+    #include <QTextCodec>
+#endif
+
 #include <iostream>
 #include "Image.h"
 
@@ -74,9 +81,17 @@ int Image::FetchUrl(bool redirect, bool bShiftJIS)
 
     QString htmlContent;
     if (bShiftJIS) {
-        // Shift-JISからUTF-8へエンコード
+        // Shift-JISからUTF-8へデコード
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QByteArray SJISData = pReply->readAll();
+
+        QStringDecoder decoder("Shift-JIS");
+        htmlContent         = decoder.decode(SJISData);
+#else
         auto codec  = QTextCodec::codecForName("Shift-JIS");
         htmlContent = codec->toUnicode(pReply->readAll());
+#endif
+
     }
     else {
         htmlContent = pReply->readAll();
@@ -231,9 +246,16 @@ int Image::FetchImageUrl(const QUrl &url, bool redirect, bool bShiftJIS)
 
     QString htmlContent;
     if (bShiftJIS) {
-        // Shift-JISからUTF-8へエンコード
+        // Shift-JISからUTF-8へデコード
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QByteArray SJISData = pReply->readAll();
+
+        QStringDecoder decoder("Shift-JIS");
+        htmlContent         = decoder.decode(SJISData);
+#else
         auto codec  = QTextCodec::codecForName("Shift-JIS");
         htmlContent = codec->toUnicode(pReply->readAll());
+#endif
     }
     else {
         htmlContent = pReply->readAll();

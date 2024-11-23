@@ -32,8 +32,8 @@ P2P地震情報では、以下のレート制限があります。
 
 <br>
 
-**このソフトウェアを動作させるには、Qt 5.15 (Core、Network) および libxml 2.0が必要となります。**  
-**Qt 6を使用してビルドおよび動作させることができる可能性もありますが、確認はしておりませんのでご注意ください。**  
+**このソフトウェアを動作させるには、Qt 5.15 / Qt 6 (Core、Networ、XML) および libxml 2.0が必要となります。**  
+**Qt 6.5.3でも動作確認しています。**  
 <br>
 
 README.mdでは、Red Hat Enterprise LinuxおよびSUSE Linux Enterprise / openSUSEを前提に記載しております。  
@@ -80,18 +80,37 @@ Raspberry Pi上での動作は確認済みです。
     # Red Hat Enterprise Linux
     sudo dnf update   
     sudo dnf install make cmake gcc gcc-c++ \  
-                     libxml2 libxml2-devel qt5-qtbase-devel  
+                     libxml2 libxml2-devel  
+                     
+                     # Qt 5を使用する場合  
+                     qt5-qtbase-devel  
+
+                     # Qt 6を使用する場合
+                     qt6-qtbase-devel \  
+                     openssl3 openssl3-libs openssl3-devel  
 
     # SUSE Linux Enterprise / openSUSE
     sudo zypper update  
     sudo zypper install make cmake gcc gcc-c++ libxml2-devel        \  
+
+                        # Qt 5を使用する場合
                         libqt5-qtbase-common-devel libQt5Core-devel \  
                         libQt5Network-devel libQt5Xml-devel  
+
+                        # Qt 6 を使用する場合  
+                        qt6-base-devel qt6-core-devel qt6-network-devel \  
+                        openssl-3 libopenssl3 libopenssl-3-devel  
 
     # Debian GNU/Linux, Raspberry Pi OS  
     sudo apt update && sudo apt upgrade  
     sudo apt install make cmake gcc libxml2 libxml2-dev \  
+
+                     # Qt 5 を使用する場合 
                      qtbase5-dev libqt5xmlpatterns5-dev  
+
+                     # Qt 6 を使用する場合  
+                     qt6-base-dev \  
+                     openssl libssl3 libssl-dev  
 <br>
 <br>
 
@@ -309,11 +328,16 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
     デフォルト値は<code>false</code> (無効) です。  
     <br>
   * alerturl  
+    * jma  
+      デフォルト値 : <code>"https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml"</code>  
+      <br>
+      緊急地震速報(警報)を取得するURLを指定します。  
+      **気象庁から緊急地震速報(警報)を取得する場合は、<code>get</code>キーを<code>0</code>に設定する必要があります。**  
+      <br>
     * p2p  
       デフォルト値 : <code>"https://api.p2pquake.net/v2/history?codes=556&limit=1&offset=0"</code>  
       <br>
       緊急地震速報(警報)を取得するURLを指定します。  
-      現在の仕様では、P2P地震情報からのみ緊急地震速報(警報)を取得することができます。  
       <br>
   * alertlog  
     デフォルト値 : <code>/tmp/eqalert.log</code>  
@@ -620,4 +644,14 @@ qEQAlertの設定ファイルであるqEQAlert.jsonファイルでは、
     ]
 
 <br>
+<br>
+
+# 5. テストファイルの使用 (緊急地震速報)
+
+緊急地震情報において、テストファイルを使用して動作試験を行うことができます。  
+これは、実行ファイルに<code>--test-file=<テストファイル (XMLファイル) のパス></code>を付加します。  
+<br>
+
+    # 実行例  
+    ./qEQAlert --test-file=/tmp/20240808190434_0_VXSE43_010000.xml  
 <br>

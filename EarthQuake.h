@@ -8,15 +8,25 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QtXml>
 #include <QFile>
-#include <QMutex>
-#include <QMutexLocker>
 #include <QTextStream>
 #include <QObject>
 #include <QException>
 #include <memory>
 #include "Image.h"
 #include "Poster.h"
+
+
+// 緊急地震速報(警報)のログファイル
+struct ALERTLOG {
+    QString     ID;             // 地震ID
+    QString     Title,          // スレッドのタイトル
+                ThreadURL,      // スレッドのURL
+                ThreadNum,      // スレッド番号
+                ReportDateTime, // 緊急地震速報(警報)の報告時刻
+                Url;            // 緊急地震速報(警報)のURL
+};
 
 
 // 緊急地震速報(警報)の対象地域
@@ -62,28 +72,35 @@ struct AREA {
 class EarthQuakeAlert
 {
 public:     // Variables
-    int         m_Code{};       // 地震の情報を表すコード
-                                // 551 : 地震の情報
-                                // 556 : 緊急地震速報(警報)の情報
-    QString     m_ID,           // 地震情報のID
-                m_Name,         // 震源地
-                m_Depth,        // 震源の深さ
-                                // 0の場合は、"ごく浅い"を表す
-                                // システムの都合で小数点が付加されるが整数部のみ有効
-                m_Magnitude,    // マグニチュード
-                                // 震源情報が存在しない場合は、-1
-                m_Latitude,     // 緯度 : 震源情報が存在しない場合は、-200または-200.0
-                m_Longitude,    // 経度 : 震源情報が存在しない場合は、-200または-200.0
-                m_OriginTime,   // 地震発生時刻
-                m_ArrivalTime;  // 地震発現(到達)時刻
-    QList<AREA> m_Areas;        // 緊急地震速報(警報)の対象地域
-    QMutex      m_Mutex;        // 排他制御用オブジェクト
+    int         m_Code{};           // 地震の情報を表すコード
+                                    // 551 : 地震の情報
+                                    // 556 : 緊急地震速報(警報)の情報
+    QString     m_ID,               // 地震情報のID
+                m_Headline,         // ヘッドライン
+                m_Name,             // 震源地
+                m_Depth,            // 震源の深さ
+                                    // 0の場合は、"ごく浅い"を表す
+                                    // システムの都合で小数点が付加されるが整数部のみ有効
+                m_Magnitude,        // マグニチュード
+                                    // 震源情報が存在しない場合は、-1
+                m_Latitude,         // 緯度 : 震源情報が存在しない場合は、-200または-200.0
+                m_Longitude,        // 経度 : 震源情報が存在しない場合は、-200または-200.0
+                m_OriginTime,       // 地震発生時刻
+                m_ArrivalTime;      // 地震発現(到達)時刻
+    QString     m_ReportDateTime;   // JMAの地震情報の報告時刻
+    QList<AREA> m_Areas;            // 緊急地震速報(警報)の対象地域
+    QString     m_Text,             // 固定付加文
+                m_VarComment,       // その他付加文
+                m_FreeFormComment;  // 自由付加文
+    QString     m_URL;              // 取得した緊急地震速報(警報)のURL
 
 public:     // Methods
-    explicit EarthQuakeAlert() = default;                       // デフォルトコンストラクタ
-    EarthQuakeAlert(const EarthQuakeAlert &obj) noexcept;       // コピーコンストラクタ
-    EarthQuakeAlert& operator=(const EarthQuakeAlert &obj);     // 代入演算子のオーバーロード
-    int AddInfo(const QString &fileName);                       // 緊急地震速報(警報)のログファイルに地震IDを保存する
+    explicit EarthQuakeAlert() = default;                           // デフォルトコンストラクタ
+    EarthQuakeAlert(const EarthQuakeAlert &obj) noexcept;           // コピーコンストラクタ
+    EarthQuakeAlert& operator=(const EarthQuakeAlert &obj);         // 代入演算子のオーバーロード
+
+    int      AddLog(const QString &fileName, ALERTLOG &alertLog);   // 緊急地震速報(警報)のログファイルに地震情報を保存する
+    void     reset();                                               // 各メンバ変数を初期化する
 };
 
 
@@ -147,22 +164,22 @@ public:     // Variables
     QString      m_Text,            // 固定付加文
                  m_VarComment,      // その他付加文
                  m_FreeFormComment; // 自由付加文
-    QString      m_ReportDateTime;  // JMAの地震情報の報告日時
+    QString      m_ReportDateTime;  // JMAの地震情報の報告時刻
     QString      m_ImageSiteURL;    // 震度分布の画像があるWebページのURL
     QString      m_ImageURL;        // 震度分布の画像URL
     QStringList  m_MaxIntPrefs;     // 最も震度の大きい都道府県
-    QMutex       m_Mutex;           // 排他制御用オブジェクト
 
 public:     // Methods
-    explicit EarthQuakeInfo() = default;                        // デフォルトコンストラクタ
-    EarthQuakeInfo(const EarthQuakeInfo &obj) noexcept;         // コピーコンストラクタ
-    EarthQuakeInfo& operator=(const EarthQuakeInfo &obj);       // 代入演算子のオーバーロード
-    int  AddInfo(const QString &fileName, const QString &title, // 発生した地震情報のログファイルに地震情報に追加する
-                 const QString &url, const QString &thread,
-                 int GetInfo);
-    int  UpdateInfo(const QString &fileName,                    // 発生した地震情報のログファイルに地震情報を更新する
-                    bool bChangeTitle, const QString &title,    // !chttコマンドを使用する場合 : スレッドタイトル名、発生日時の更新、地震IDを更新
-                    int GetInfo);                               // !chttコマンドを使用しない場合 : 発生日時、地震IDを更新
+    explicit EarthQuakeInfo() = default;                            // デフォルトコンストラクタ
+    EarthQuakeInfo(const EarthQuakeInfo &obj) noexcept;             // コピーコンストラクタ
+    EarthQuakeInfo& operator=(const EarthQuakeInfo &obj);           // 代入演算子のオーバーロード
+    int     AddInfo(const QString &fileName, const QString &title, // 発生した地震情報のログファイルに地震情報に追加する
+                    const QString &url, const QString &thread,
+                    int GetInfo);
+    int     UpdateInfo(const QString &fileName,                    // 発生した地震情報のログファイルに地震情報を更新する
+                       bool bChangeTitle, const QString &title,    // !chttコマンドを使用する場合 : スレッドタイトル名、発生日時の更新、地震IDを更新
+                       int GetInfo);                               // !chttコマンドを使用しない場合 : 発生日時、地震IDを更新
+    void    reset();                                               // 各メンバ変数を初期化する
 };
 
 
@@ -186,6 +203,7 @@ struct COMMONDATA {
                                     // デフォルトは、"/html/head/title"タグを取得する
                     ThreadNumXPath; // スレッドの最後尾のレス番号を取得するXPath
     int             MaxThreadNum;   // スレッドの最大書き込み数
+    QString         TestFile;       // テストファイルを使用する場合のファイルのパス (XMLまたはJSON)
 };
 
 
@@ -209,24 +227,28 @@ class Worker : public QObject
 private:    // Variables
     std::unique_ptr<QNetworkAccessManager>  m_pEQManager;       // 緊急地震速報(警報)および発生した地震情報と通信するネットワークオブジェクト
     QByteArray                              m_ReplyData;        // 緊急地震速報(警報)のデータおよび発生した地震情報のデータを保存するオブジェクト
-    COMMONDATA                              m_CommonData;       // 各ログファイルの情報と共用するための構造体
+    COMMONDATA                              m_CommonData;       // ログファイルの情報と共用するための構造体
     EarthQuakeAlert                         m_Alert;            // 緊急地震速報(警報)のデータ
+    ALERTLOG                                m_AlertLog;         // 緊急地震速報(警報)のログファイルのデータ
     EarthQuakeInfo                          m_Info;             // 発生した地震情報のデータ
-    INFOLOG                                 m_InfoLog;          // 発生した地震情報のログファイル
-    THREAD_INFO                             m_ThreadInfo;       // 新規スレッドを作成するための情報
+    INFOLOG                                 m_InfoLog;          // 発生した地震情報のログファイルのデータ
+    THREAD_INFO                             m_ThreadInfo;       // スレッドの新規作成あるいは既存のスレッドに書き込みするための情報
 
 public:     // Variables
 
 private:    // Methods
-    int         onEQDownloaded_for_JMA();                                       // JMAから発生した地震情報のURLを取得する
+    int         onEQDownloaded_for_JMA(bool bAlert);                            // JMAから発生した地震情報のURLを取得する
     int         DownloadContents(const QUrl &url);                              // JMAから取得した地震情報のデータを取得する
     int         onEQDownloaded_for_P2P();                                       // 緊急地震速報(警報)および発生した地震情報のデータを取得する
-    int         FormattingData_for_JMA();                                       // JMAから取得した地震情報を整形する
+    int         FormattingData_for_JMA(bool bAlert);                            // JMAから取得した地震情報を整形する
+    bool        GetElementText(const QDomElement &parent,
+                               const QString &tagName,
+                               QString &result);
     int         FormattingData_for_P2P();                                       // P2P地震情報から取得した地震情報を整形する
     int         FormattingThreadInfo();                                         // 整形した地震情報のデータをスレッド情報へ整形する
     int         AddEQInfoImage(EQIMAGEINFO &EQImageInfo);                       // Yahoo天気・災害の地震情報一覧にアクセスして、震度分布の画像を検索・追記する
     int         Post(int EQCode, bool bCreateThread = true);                    // スレッドを新規作成する
-    [[nodiscard]] bool  SearchAlertEQID(const QString &ID) const;               // 地震IDを保存しているログファイルから同じ地震IDが存在するかどうかを確認する
+    [[nodiscard]] bool  SearchAlertEQID(const QString &searchValue) const;      // 緊急地震速報(警報)のログファイルから地震情報を検索する
     [[nodiscard]] bool  SearchInfoEQID(const QString &ID) const;                // 地震情報のログファイルから同じ地震IDが存在するかどうかを確認する
     [[nodiscard]] bool  SearchInfoEQID(const QString &ID,                       // 地震情報のログファイルから同じ地震IDの"ReportDateTime"キーの日時が存在するかどうかを確認する
                                        const QString &reportDateTime) const;
@@ -254,8 +276,10 @@ private:    // Methods
     T           ConvertJMAScale(const QString &strScale);                       // JMAから取得した震度をP2P地震情報の震度の形式に変換する
 
 public:     // Methods
-    explicit Worker(QObject *parent = nullptr);
-    Worker(COMMONDATA CommonData, THREAD_INFO threadInfo, QObject *parent = nullptr);
+    explicit Worker(QObject *parent = nullptr);                                 // コンストラクタ
+    Worker(COMMONDATA CommonData, THREAD_INFO threadInfo,                       // コンストラクタ
+           QObject *parent = nullptr);
+    void        initialize();                                                   // 各メンバ変数を初期化する
 
 signals:
 
@@ -272,23 +296,15 @@ class EarthQuake : public QObject
     Q_OBJECT
 
 private:    // Variables
-    int                                     m_iGetInfo;         // 地震情報を取得するWebサイト
-                                                                // 0 : JMA (気象庁)
-                                                                // 1 : P2P地震情報
     QString                                 m_EQAlertURL,       // 緊急地震速報(警報)を取得するURL
                                             m_EQInfoURL;        // 発生した地震情報を取得するURL
-    bool                                    m_bEQAlert;         // 緊急地震速報(警報)の有効 / 無効
-    bool                                    m_bEQInfo;          // 地震情報の有効 / 無効
-    int                                     m_AlertScale,       // ユーザが設定した緊急地震速報(警報)の震度の閾値
-                                            m_InfoScale;        // ユーザが設定した発生した地震情報の震度の閾値
+    bool                                    m_bEQAlert,         // 緊急地震速報(警報)の有効 / 無効
+                                            m_bEQInfo;          // 地震情報の有効 / 無効
     QString                                 m_AlertFile,        // 緊急地震速報(警報)のIDを保存するファイルパス
-                                            m_InfoFile,         // 発生した地震情報のIDを保存するファイルパス
-                                            m_RequestURL;       // スレッドを立てるためのPOSTデータを送信するURL
-    bool                                    m_bSubjectTime;     // 緊急地震地震速報で新規スレッドを作成する場合、スレッドタイトルに地震発現(到達)時刻を記載するかどうか
-    bool                                    m_EQchangeTitle;    // 発生した地震情報のスレッドのタイトルを変更するかどうか
+                                            m_InfoFile;         // 発生した地震情報のIDを保存するファイルパス
+    COMMONDATA                              m_CommonData;       // 各ログファイルの情報と共用するための構造体
     THREAD_INFO                             m_ThreadInfo;       // スレッドを立てるための情報オブジェクト
-    QString                                 m_ExpiredXPath;     // スレッドの生存を判断するときに使用するXPath
-                                                                // デフォルトは、"/html/head/title"タグを取得する
+    EQIMAGEINFO                             m_EQImageInfo;      // 震度画像を取得するための設定オブジェクト
     std::unique_ptr<Worker>                 m_pEQAlertWorker;   // 緊急地震速報(警報)オブジェクト
     std::unique_ptr<Worker>                 m_pEQInfoWorker;    // 発生した地震情報オブジェクト
 
@@ -297,13 +313,13 @@ public:     // Variables
 private:    // Methods
 
 public:     // Methods
-    [[maybe_unused]] explicit EarthQuake(QObject *parent = nullptr);
-    explicit EarthQuake(int iGetInfo, QString EQAlertURL, QString EQInfoURL,
-                        bool bEQAlert, bool bEQInfo, int AlertScale, int InfoScale, QString AlertFile, QString InfoFile,
-                        QString RequestURL, bool bSubjectTime, bool bEQchangeTitle, THREAD_INFO ThreadInfo, QString ExpiredXPath,
+    explicit EarthQuake(COMMONDATA CommonData, THREAD_INFO ThreadInfo, EQIMAGEINFO &EQImageInfo,
+                        bool bEQAlert, QString EQAlertURL, QString AlertFile,
+                        bool bEQInfo,  QString EQInfoURL,  QString InfoFile,
                         QObject *parent = nullptr);
-    ~EarthQuake() override;
-    int     EQProcess(EQIMAGEINFO &EQImageInfo);                // 緊急地震速報(警報)および発生した地震情報を取得して新規スレッドを作成する
+    ~EarthQuake() override;             // デストラクタ
+    int     EQProcessAlert();           // 緊急地震速報(警報)を取得して新規スレッドを作成する
+    int     EQProcessInfo();            // 発生した地震情報を取得して新規スレッドを作成または既存のスレッドに書き込みする
 
 signals:
 
