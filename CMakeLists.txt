@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(qEQAlert VERSION 0.4.0 LANGUAGES C CXX)
+project(qEQAlert VERSION 0.4.1 LANGUAGES C CXX)
 
 
 # Linuxのみビルドを許可
@@ -195,7 +195,7 @@ install(FILES
 
 
 ## Systemdサービスファイル
-if(NOT (UNIX AND NOT APPLE AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "BSD"))
+if(UNIX AND NOT APPLE AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "BSD")
     ## PID (プロセスID) ディレクトリのオプション
     set(PID "/var/run" CACHE PATH "Directory to qEQAlert.pid")
 
