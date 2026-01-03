@@ -389,7 +389,7 @@ int Worker::onEQDownloaded_for_JMA(bool bAlert)
                         // <id>タグの値に"VXSE"という文字列が含まれているかどうかを確認する
                         if (bAlert) {
                             // "VXSE43"という文字列が含まれている場合は、それが緊急地震速報 (警報) のURLである
-                            // "VXSE44" : 緊急地震速報 (予報)
+                            // "VXSE44" : 緊急地震速報 (予報 - 配信終了予定)
                             // "VXSE45" : 緊急地震速報 (地震動予報)
                             // "VXSE47" : リアルタイム震度電文
                             // 仕様 : https://www.data.jma.go.jp/eew/data/nc/katsuyou/reference.pdf
@@ -982,7 +982,7 @@ int Worker::FormattingData_for_JMA(bool bAlert)
                                     POINT point = {.Addr   = areaName,
                                         .Pref   = prefName,
                                         .Scale  = areaMaxInt,
-                                        .IsArea = false
+                                        .IsArea = true
                                     };
                                     m_Info.m_Points.append(point);
                                 }
@@ -1508,7 +1508,14 @@ int Worker::FormattingThreadInfo()
         auto count = 0;
         for (auto &point : m_Info.m_Points) {
             auto scale = point.Scale;
-            m_ThreadInfo.message += QString("%1%2 : 震度 %3").arg(point.Pref, point.Addr, ConvertScale(scale)) + "\n";
+            // IsAreaフラグで表示を切り替え
+            // Area要素の場合（IsArea=true）：Addrに都道府県名が既に含まれているため、Addrのみ表示
+            // City要素の場合（IsArea=false）：市町村名のみのため、Pref+Addrを表示
+            if (point.IsArea) {
+                m_ThreadInfo.message += QString("%1 : 震度 %2").arg(point.Addr, ConvertScale(scale)) + "\n";
+            } else {
+                m_ThreadInfo.message += QString("%1%2 : 震度 %3").arg(point.Pref, point.Addr, ConvertScale(scale)) + "\n";
+            }
 
             /// 7つの地域を超える地域が存在する場合、それ以上は記載しない
             if (count >= 6) break;
@@ -2290,7 +2297,7 @@ int Worker::DeleteObject(const QStringList &prefs) const
     QFile File(m_CommonData.LogFile);
     if (!File.open(QIODevice::ReadOnly)) {
         std::cerr << QString("エラー : 発生した地震情報のログファイルのオープンに失敗 %1").arg(File.errorString()).toStdString() << std::endl;
-            return -1;
+        return -1;
     }
 
     // ログファイルの読み込み
@@ -2345,7 +2352,7 @@ int Worker::DeleteObject(const QStringList &prefs) const
     // ログファイルを開く
     if (!File.open(QIODevice::WriteOnly)) {
         std::cerr << QString("エラー : 発生した地震情報のログファイルのオープンに失敗 %1").arg(File.errorString()).toStdString() << std::endl;
-            return -1;
+        return -1;
     }
 
     // ログファイルの更新

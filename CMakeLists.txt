@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(qEQAlert VERSION 0.4.1 LANGUAGES C CXX)
+project(qEQAlert VERSION 0.4.2 LANGUAGES C CXX)
 
 
 # Linuxのみビルドを許可
@@ -128,6 +128,29 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch
             target_compile_definitions(qEQAlert PRIVATE ARM_WMMX)
             set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv7-a+simd")
         endif()
+    endif()
+endif()
+
+## RISC-V64かどうかを確認
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64")
+    message("Detected RISC-V64 architecture")
+
+    # RISC-V64用の基本的なフラグを設定
+    target_compile_definitions(qEQAlert PRIVATE RISCV64)
+
+    # RISC-V Vector Extension (RVV) のサポートをチェック
+    include(CheckCXXCompilerFlag)
+
+    # RVV 1.0をチェック
+    CHECK_CXX_COMPILER_FLAG("-march=rv64gcv" COMPILER_SUPPORTS_RVV)
+    if(COMPILER_SUPPORTS_RVV)
+        message("RISC-V Vector Extension (RVV) is supported")
+        target_compile_definitions(qEQAlert PRIVATE RISCV_VECTOR)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=rv64gcv")
+    else()
+        # RVVが利用できない場合は、標準的なRISC-V64の設定
+        message("RISC-V Vector Extension (RVV) is not supported, using standard rv64gc")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=rv64gc")
     endif()
 endif()
 
